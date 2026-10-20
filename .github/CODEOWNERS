@@ -10,7 +10,14 @@
 /CODE_OF_CONDUCT.md  @hist0613
 /LICENSE             @hist0613
 
-# 팀 프로젝트 — 팀이 자기 폴더와 오너 줄을 이 아래에 PR 로 추가한다.
-# 이 파일이 .github/ 안에 있으므로 그 PR 은 교수 approval 을 거친다.
+# 팀 프로젝트 — 팀 폴더는 같은 팀원이 approve 해야 merge 된다.
+# 오너를 바꾸려면 이 파일을 PR 로 고친다. .github/ 안이라 교수 approval 을 거친다.
 # 오너로 적는 사람은 이 repo 에 write 권한이 있어야 한다.
-# 예: /projects/team-a/  @github-id-1 @github-id-2
+
+/projects/drone-rl/        @torilove11 @EricYang544 @hufs24lsh
+# 성혁준 ID 확인 후 추가
+/projects/market-trend/    @OptiGTO @PeaceSign
+/projects/file-organizer/  @jaeeewon @ChoYeEun03 @ch922b @sungyh03
+
+# 제안서는 교수 approval
+/projects/*/PROPOSAL.md    @hist0613

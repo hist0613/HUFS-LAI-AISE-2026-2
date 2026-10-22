@@ -13,6 +13,7 @@
 # 팀 프로젝트 — 팀 폴더는 같은 팀원이 approve 해야 merge 된다.
 # 오너를 바꾸려면 이 파일을 PR 로 고친다. .github/ 안이라 교수 approval 을 거친다.
 # 오너로 적는 사람은 이 repo 에 write 권한이 있어야 한다.
+# 폴더 이름을 바꿀 때는 아래 줄도 같은 PR 에서 고친다 (CONTRIBUTING.md 참고).
 
 /projects/drone-rl/        @torilove11 @EricYang544 @hufs24lsh
 # 성혁준 ID 확인 후 추가

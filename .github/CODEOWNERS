@@ -15,8 +15,7 @@
 # 오너로 적는 사람은 이 repo 에 write 권한이 있어야 한다.
 # 폴더 이름을 바꿀 때는 아래 줄도 같은 PR 에서 고친다 (CONTRIBUTING.md 참고).
 
-/projects/drone-rl/        @torilove11 @EricYang544 @hufs24lsh
-# 성혁준 ID 확인 후 추가
+/projects/drone-rl/        @torilove11 @EricYang544 @hufs24lsh @kmjshj0329-eng
 /projects/market-trend/    @OptiGTO @PeaceSign
 /projects/file-organizer/  @jaeeewon @ChoYeEun03 @ch922b @sungyh03
 

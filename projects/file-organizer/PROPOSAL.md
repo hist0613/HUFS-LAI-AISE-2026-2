@@ -2,18 +2,50 @@
 
 ## 팀
 
-- 팀 이름:
+- 팀 이름: 자파
 - 팀원 (이름 · GitHub ID):
+  - 최현빈 · @ch922b
+  - 성유헌 · @sungyh03
+  - 조예은 · @ChoYeEun03
+  - 최재원 · @jaeeewon
 
 ## 프로젝트 이름
 
-<!-- 지금 폴더 이름(`file-organizer`)은 임시다. 이름을 정하면 여기 적는다. 폴더 이름도 바꾸려면 CONTRIBUTING.md 의 "프로젝트 폴더 이름 바꾸기" 를 따른다. -->
-
-- 프로젝트 이름:
-- 폴더 이름:
+- 프로젝트 이름: Local LLM File Organizer
+- 폴더 이름: file-organizer
 
 ## 무엇을 만들 것인가
 
+### 1. 배경 및 필요성
+- 다운로드 폴더나 작업 디렉터리에 무질서하게 누적되는 수많은 파일들을 사람이 일일이 수작업으로 분류하고 이름을 정리하는 데 많은 시간과 피로도가 소모됩니다.
+- 클라우드 기반 상용 LLM API를 활용할 경우 파일명, 문서 경로, 개인 프로젝트 메타데이터가 외부 서버로 전송되어 보안 및 개인정보(Privacy) 유출 위험이 존재합니다.
+- 이에 따라 **외부 통신이 없는 로컬 LLM**을 기반으로 안전하고 지능적인 파일 정리 CLI 도구를 개발하고자 합니다.
+
+### 2. 핵심 기능
+1. **Privacy-First (로컬 LLM 직접 연동)**:
+   - 외부 API 호출 없이 로컬에서 구동되는 [Ollama](https://ollama.com/)(`llama3.2`, `qwen2.5` 등)를 활용하여 민감한 파일 정보 유출을 원천 차단합니다.
+2. **Human-in-the-Loop Review (터미널 Diff 사전 검토)**:
+   - LLM이 제안한 정리 계획(폴더 분류 및 파일명 정규화)을 즉시 적용하지 않고, 터미널 상에 직관적인 Diff 표(이전 경로 $\rightarrow$ 제안 경로, 사유)로 출력하여 사용자의 명시적 승인(`y/n`)을 거친 후 실행합니다.
+3. **Non-Destructive & Safe Execution (비파괴 안전 원칙)**:
+   - 파일의 영구 삭제 기능을 배제하고, 동일 파일명 충돌 시 덮어쓰지 않고 스킵/보존합니다.
+   - 대상 디렉터리 외부로의 경로 이탈(Path Traversal) 공격을 엄격히 차단합니다.
+4. **1-Click Rollback (JSON 세션 저널 기반 Undo)**:
+   - 적용된 모든 파일 이동/이름 변경 내역을 세션 저널 로그(JSON)에 원자적(Atomic)으로 기록하여, 언제든 단일 명령어(`python -m src.cli undo`)로 작업 이전 상태로 100% 원상 복구할 수 있도록 보장합니다.
+
 ## 누가 어떤 몫을 맡나
 
+- **Scanner & Metadata Indexer**: 대상 디렉터리 재귀 탐색, 파일 크기·확장자·수정일시 등 메타데이터 추출 및 무시 규칙(Ignore Rules) 필터링 모듈 개발
+- **LLM Strategist & Prompt Engineer**: Ollama REST API 연동 클라이언트, 폴더 분류 및 파일명 정규화를 위한 Structured Output(JSON Schema) 프롬프트 엔지니어링
+- **Executor & Safety Guard**: 파일 시스템 이동/이름 변경 트랜잭션, 터미널 Diff UI, 경로 탈출 방지 보안 검증 및 세션 저널 기록/Undo 엔진 구현
+- **Test & CI Verification**: Mock 파일 트리 및 가상 파일 시스템 기반 단위 테스트(`pytest`) 작성, GitHub Actions CI 파이프라인 구성
+
 ## 무엇이 되면 끝인가
+
+1. **CLI 기반 정리 및 검토 인터랙션**:
+   - `python -m src.cli organize <target_folder>` 실행 시 로컬 Ollama를 통해 정리 계획을 생성하고 터미널에 Diff를 출력하며, 사용자 승인(`y`) 시 계획대로 파일이 안전하게 재배치된다.
+2. **원클릭 Undo 무결성 검증**:
+   - `python -m src.cli undo` 실행 시 직전 수행된 작업의 이동 이력을 추적하여 파일들이 본래 위치와 이름으로 온전히 복구된다.
+3. **안전성 검증 통과**:
+   - 대상 디렉터리 상위 경로 접근 시도 차단 및 중복 파일명 충돌 방지 로직이 정상 작동한다.
+4. **단위 테스트 및 CI 통과**:
+   - 핵심 모듈별 단위 테스트(`pytest`)가 작성되고 GitHub Actions CI에서 에러 없이 모두 통과한다.

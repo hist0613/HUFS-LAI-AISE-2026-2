@@ -23,7 +23,7 @@
 
 ### 2. 핵심 기능
 1. **Privacy-First (로컬 LLM 직접 연동)**:
-   - 외부 API 호출 없이 로컬에서 구동되는 [Ollama](https://ollama.com/)(`llama3.2`, `qwen2.5` 등)를 활용하여 민감한 파일 정보 유출을 원천 차단합니다.
+   - 외부 API 호출 없이 로컬 환경에서 구동되는 로컬 LLM을 활용하여 민감한 파일 정보 유출을 원천 차단합니다.
 2. **Human-in-the-Loop Review (터미널 Diff 사전 검토)**:
    - LLM이 제안한 정리 계획(폴더 분류 및 파일명 정규화)을 즉시 적용하지 않고, 터미널 상에 직관적인 Diff 표(이전 경로 $\rightarrow$ 제안 경로, 사유)로 출력하여 사용자의 명시적 승인(`y/n`)을 거친 후 실행합니다.
 3. **Non-Destructive & Safe Execution (비파괴 안전 원칙)**:
@@ -34,15 +34,25 @@
 
 ## 누가 어떤 몫을 맡나
 
-- **Scanner & Metadata Indexer**: 대상 디렉터리 재귀 탐색, 파일 크기·확장자·수정일시 등 메타데이터 추출 및 무시 규칙(Ignore Rules) 필터링 모듈 개발
-- **LLM Strategist & Prompt Engineer**: Ollama REST API 연동 클라이언트, 폴더 분류 및 파일명 정규화를 위한 Structured Output(JSON Schema) 프롬프트 엔지니어링
-- **Executor & Safety Guard**: 파일 시스템 이동/이름 변경 트랜잭션, 터미널 Diff UI, 경로 탈출 방지 보안 검증 및 세션 저널 기록/Undo 엔진 구현
-- **Test & CI Verification**: Mock 파일 트리 및 가상 파일 시스템 기반 단위 테스트(`pytest`) 작성, GitHub Actions CI 파이프라인 구성
+> *(아래 배치는 가나다순으로 임시 배정한 담당자 목록이며, 팀 내 협의에 따라 추후 조정될 수 있습니다)*
+
+- **Scanner & Metadata Indexer (성유헌 · @sungyh03)**:
+  - 대상 디렉터리 탐색 및 파일 크기, 확장자, 수정일시 등 파일 메타데이터 추출 모듈 개발
+  - 정리 대상에서 제외할 무시 규칙(Ignore Rules) 필터링 구현
+- **LLM Strategist & Prompt Engineer (조예은 · @ChoYeEun03)**:
+  - 로컬 LLM 인터페이스 연동
+  - 폴더 분류 및 파일명 정규화 계획 도출을 위한 프롬프트 설계 및 응답 파싱
+- **Executor & Safety Guard (최재원 · @jaeeewon)**:
+  - 안전한 파일 이동 실행 및 터미널 Diff 사전 검토 화면 구현
+  - 경로 이탈 방지 등 안전성 검증 및 작업 되돌리기(Undo) 엔진 구현
+- **Test & CI Verification (최현빈 · @ch922b)**:
+  - 모의 파일 구조 기반 핵심 기능 단위 테스트(`pytest`) 작성
+  - GitHub Actions CI 연동 및 자동 검증 환경 구성
 
 ## 무엇이 되면 끝인가
 
 1. **CLI 기반 정리 및 검토 인터랙션**:
-   - `python -m src.cli organize <target_folder>` 실행 시 로컬 Ollama를 통해 정리 계획을 생성하고 터미널에 Diff를 출력하며, 사용자 승인(`y`) 시 계획대로 파일이 안전하게 재배치된다.
+   - `python -m src.cli organize <target_folder>` 실행 시 로컬 LLM을 통해 정리 계획을 생성하고 터미널에 Diff를 출력하며, 사용자 승인(`y`) 시 계획대로 파일이 안전하게 재배치된다.
 2. **원클릭 Undo 무결성 검증**:
    - `python -m src.cli undo` 실행 시 직전 수행된 작업의 이동 이력을 추적하여 파일들이 본래 위치와 이름으로 온전히 복구된다.
 3. **안전성 검증 통과**:

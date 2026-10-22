@@ -1,3 +1,7 @@
+import sys
+
+n = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+
 star = [
     "       *",
     "      ***",
@@ -10,4 +14,6 @@ star = [
 ]
 
 for line in star:
-    print(line)
+    scaled = "".join(c * n for c in line)
+    for _ in range(n):
+        print(scaled)

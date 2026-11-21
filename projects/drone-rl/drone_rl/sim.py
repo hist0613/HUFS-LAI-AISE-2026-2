@@ -6,6 +6,9 @@ import os
 import mujoco
 import numpy as np
 
+OBSTACLE_GEOM_GROUP = 1
+TARGET_GEOM_GROUP = 2
+
 ROVER_START_X = 1.25
 ROVER_FINISH_X = 12.0
 ROVER_SPEED = 1.0
@@ -78,24 +81,25 @@ class Sim:
         for name, x in [("beam", 2), ("finish_beam", 11.5)]:
             world.add_geom(name=name, type=geom.mjGEOM_CYLINDER,
                            fromto=[x, -45, 1.6, x, 45, 1.6], size=[0.15],
+                           group=OBSTACLE_GEOM_GROUP,
                            rgba=[1, 0.72, 0.05, 1])
         for name, x, y in [("left_pillar", 7, 0.8), ("right_pillar", 9, -0.8),
                            ("rear_pillar", 10.5, 0.8)]:
             world.add_geom(name=name, type=geom.mjGEOM_CYLINDER, pos=[x, y, 1.25],
-                           size=[0.25, 1.25], rgba=[0.76, 0.77, 0.80, 1])
+                           size=[0.25, 1.25], group=OBSTACLE_GEOM_GROUP, rgba=[0.76, 0.77, 0.80, 1])
 
         # 차량은 드론 앞에서 출발해 두 빔 아래와 세 기둥 사이를 지나간다.
         target = world.add_body(name="target", mocap=True, pos=[ROVER_START_X, 0, 0.1])
         target.add_geom(name="rover_chassis", type=geom.mjGEOM_BOX,
                         size=[0.21, 0.12, 0.05], rgba=[0.89, 0.17, 0.07, 1],
-                        contype=0, conaffinity=0)
+                        contype=0, conaffinity=0, group=TARGET_GEOM_GROUP)
         target.add_geom(name="rover_cab", type=geom.mjGEOM_BOX,
                         size=[0.085, 0.10, 0.05], pos=[0.06, 0, 0.08],
-                        rgba=[0.14, 0.21, 0.29, 1], contype=0, conaffinity=0)
+                        rgba=[0.14, 0.21, 0.29, 1], contype=0, conaffinity=0, group=TARGET_GEOM_GROUP)
         for x, y in [(-0.14, -0.125), (-0.14, 0.125), (0.14, -0.125), (0.14, 0.125)]:
             target.add_geom(type=geom.mjGEOM_CYLINDER, size=[0.065, 0.0275],
                             pos=[x, y, -0.035], axisangle=[1, 0, 0, 90],
-                            rgba=[0.10, 0.12, 0.15, 1], contype=0, conaffinity=0)
+                            rgba=[0.10, 0.12, 0.15, 1], contype=0, conaffinity=0, group=TARGET_GEOM_GROUP)
 
         self.model = spec.compile()
         self._drone = self.model.body("x2").id
@@ -107,6 +111,8 @@ class Sim:
         self.model.qpos0[self._q:self._q + 3] = [0, 0, 1.6]
         self.data = mujoco.MjData(self.model)
         mujoco.mj_forward(self.model, self.data)
+        self._target_unseen_since_s = None
+        self._last_observation_s = 0.0
         self.collisions = 0
         self._touching = set()
 

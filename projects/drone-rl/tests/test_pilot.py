@@ -1,4 +1,4 @@
-"""Independent X2 fixture for later pilot tests; no course or controller yet.
+"""Independent X2 fixture and motor allocation tests; no course required.
 
 Model: MuJoCo Menagerie / Skydio X2 (Apache-2.0), via robot_descriptions.
 Run with Python 3.12: python -m pytest tests/test_pilot.py -v
@@ -8,6 +8,8 @@ The first model import downloads Menagerie and requires git and network access.
 import mujoco
 import numpy as np
 import pytest
+
+from drone_rl.pilot import MotorMixer
 
 
 def reset_drone(model, data):
@@ -100,3 +102,89 @@ def test_reset_reproduces_trajectory(pilot_model, pilot_data):
             mujoco.mj_step(m, d)
         runs.append(np.concatenate((d.qpos, d.qvel)))
     np.testing.assert_allclose(runs[0], runs[1], rtol=0, atol=1e-12)
+
+
+@pytest.fixture
+def mixer(pilot_model):
+    return MotorMixer(pilot_model)
+
+
+def applied_wrench(model, data, ctrl):
+    """Measure MuJoCo actuator force and COM torque in the body frame."""
+    data.ctrl[:] = ctrl
+    mujoco.mj_forward(model, data)
+    body = model.body("x2").id
+    v = model.jnt_dofadr[model.body_jntadr[body]]
+    rotation = data.xmat[body].reshape(3, 3)
+    force = rotation.T @ data.qfrc_actuator[v:v + 3]
+    torque = data.qfrc_actuator[v + 3:v + 6] - np.cross(model.body_ipos[body], force)
+    return force, torque
+
+
+@pytest.mark.parametrize("thrust", [0, 13, 26, 52])
+def test_equal_motor_thrust(mixer, pilot_model, pilot_data, thrust):
+    ctrl = mixer.mix(thrust, [0, 0, 0])
+    np.testing.assert_allclose(ctrl, np.full(4, thrust / 4))
+    force, torque = applied_wrench(pilot_model, pilot_data, ctrl)
+    np.testing.assert_allclose(force, [0, 0, thrust], atol=1e-10)
+    np.testing.assert_allclose(torque, 0, atol=1e-10)
+
+
+@pytest.mark.parametrize("axis", [0, 1, 2])
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_axis_torque_matches_mujoco(mixer, pilot_model, pilot_data, axis, sign):
+    requested = np.zeros(3)
+    requested[axis] = sign * 0.1
+    ctrl = mixer.mix(20, requested)
+    force, torque = applied_wrench(pilot_model, pilot_data, ctrl)
+    np.testing.assert_allclose(force, [0, 0, 20], atol=1e-10)
+    np.testing.assert_allclose(torque, requested, atol=1e-10)
+
+
+def test_body_frame_torque_when_rotated(mixer, pilot_model, pilot_data):
+    pilot_data.qpos[3:7] = [np.cos(0.3), 0, np.sin(0.3), 0]
+    requested = np.array([0.1, -0.1, 0.05])
+    force, torque = applied_wrench(pilot_model, pilot_data, mixer.mix(20, requested))
+    np.testing.assert_allclose(force, [0, 0, 20], atol=1e-10)
+    np.testing.assert_allclose(torque, requested, atol=1e-10)
+
+
+@pytest.mark.parametrize("thrust", [-10, 0, 1, 26, 51, 52, 100])
+def test_saturation_preserves_thrust(mixer, pilot_model, pilot_data, thrust):
+    requested = np.array([10, -20, 5])
+    ctrl = mixer.mix(thrust, requested)
+    assert np.isfinite(ctrl).all()
+    assert np.all((0 <= ctrl) & (ctrl <= 13))
+    force, torque = applied_wrench(pilot_model, pilot_data, ctrl)
+    np.testing.assert_allclose(force, [0, 0, np.clip(thrust, 0, 52)], atol=1e-10)
+    scale = torque[0] / requested[0]
+    assert -1e-10 <= scale < 1
+    np.testing.assert_allclose(torque, requested * scale, atol=1e-10)
+    assert np.any(np.isclose(ctrl, 0) | np.isclose(ctrl, 13))
+
+
+@pytest.mark.parametrize("thrust,torque", [
+    (np.nan, [0, 0, 0]), (np.inf, [0, 0, 0]),
+    (13, [0, np.nan, 0]), (13, [0, 0, np.inf]),
+    (13, [0, 0]), ([13], [0, 0, 0]),
+    (13, [np.finfo(float).max] * 3),
+])
+def test_invalid_mixer_requests(mixer, thrust, torque):
+    with pytest.raises(ValueError):
+        mixer.mix(thrust, torque)
+
+
+def test_mixer_uses_model_motor_geometry(pilot_model):
+    # Change arm lengths and yaw gear to catch hard-coded X2 constants.
+    import copy
+
+    model = copy.copy(pilot_model)
+    sites = model.actuator_trnid[:, 0]
+    model.site_pos[sites, :2] *= 1.2
+    model.actuator_gear[:, 5] *= 1.5
+    ctrl = MotorMixer(model).mix(20, [0.1, 0, 0.1])
+    data = mujoco.MjData(model)
+    reset_drone(model, data)
+    force, torque = applied_wrench(model, data, ctrl)
+    np.testing.assert_allclose(force, [0, 0, 20], atol=1e-10)
+    np.testing.assert_allclose(torque, [0.1, 0, 0.1], atol=1e-10)

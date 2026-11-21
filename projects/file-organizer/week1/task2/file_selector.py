@@ -1,4 +1,4 @@
-"""파일 메타데이터와 조건 목록을 받아 selected 값을 추가한다."""
+"""파일 메타데이터와 조건 목록을 받아 selected 값을 계산한다."""
 
 import operator
 from datetime import datetime
@@ -16,7 +16,10 @@ _OPERATORS = {
 
 
 def _parse_time(value: str) -> datetime:
-    result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    # Python 3.10에서도 파일 수집기가 붙이는 UTC 접미사 Z를 처리한다.
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    result = datetime.fromisoformat(value)
     if result.utcoffset() is None:
         raise ValueError("mtime에는 Z 또는 +09:00 같은 시간대가 필요합니다.")
     return result
@@ -42,7 +45,12 @@ def select_files(
     files: list[dict[str, Any]],
     conditions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """각 파일에 selected(bool)를 추가한 새 목록을 반환한다.
+    """각 파일의 selected(bool)를 다시 계산해 새 목록을 반환한다.
+
+    파일 수집기는 selected=False와 UTC mtime(예: 2026-11-14T16:30:00Z)을
+    전달한다. 반환값의 selected는 입력에 있는 값과 관계없이 조건으로 결정된다.
+    mtime의 contains는 저장된 UTC 문자열을 그대로 검사한다. 다른 연산자는
+    +09:00 같은 시간대가 지정된 조건값도 받아 실제 시각을 비교한다.
 
     conditions 예시:
         [{"field": "ext", "op": "eq", "value": ".pdf"},

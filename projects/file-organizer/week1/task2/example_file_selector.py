@@ -15,6 +15,7 @@ files = [
         "ext": ".pdf",
         "size_bytes": 1048576,
         "mtime": "2026-11-14T10:30:00Z",
+        "selected": False,
     },
     {
         "file_id": "f_0002",
@@ -22,7 +23,8 @@ files = [
         "name": "2026_최종보고서.pdf",
         "ext": ".pdf",
         "size_bytes": 2097152,
-        "mtime": "2026-11-14T20:30:00+09:00",
+        "mtime": "2026-11-14T16:30:00Z",
+        "selected": False,
     },
     {
         "file_id": "f_0003",
@@ -31,6 +33,7 @@ files = [
         "ext": ".txt",
         "size_bytes": 100,
         "mtime": "2026-11-13T10:30:00Z",
+        "selected": False,
     },
 ]
 
@@ -45,7 +48,7 @@ conditions = [
 if __name__ == "__main__":
     result = select_files(files, conditions)
 
-    print("selected가 추가된 전체 결과:")
+    print("selected를 계산한 전체 결과:")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     print("\n파일별 선택 상태:")

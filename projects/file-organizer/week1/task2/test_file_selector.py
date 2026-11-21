@@ -14,6 +14,7 @@ class FileSelectorTests(unittest.TestCase):
                 "ext": ".pdf",
                 "size_bytes": 1048576,
                 "mtime": "2026-11-14T10:30:00Z",
+                "selected": False,
             },
             {
                 "file_id": "f_0002",
@@ -21,7 +22,8 @@ class FileSelectorTests(unittest.TestCase):
                 "name": "2026_최종보고서.pdf",
                 "ext": ".pdf",
                 "size_bytes": 2097152,
-                "mtime": "2026-11-14T20:30:00+09:00",
+                "mtime": "2026-11-14T16:30:00Z",
+                "selected": False,
             },
             {
                 "file_id": "f_0003",
@@ -30,6 +32,7 @@ class FileSelectorTests(unittest.TestCase):
                 "ext": ".txt",
                 "size_bytes": 100,
                 "mtime": "2026-11-13T10:30:00Z",
+                "selected": False,
             },
         ]
 
@@ -50,7 +53,8 @@ class FileSelectorTests(unittest.TestCase):
         self.assertEqual([f["selected"] for f in result], [True, False, False])
         self.assertEqual(self.files, original)
         self.assertEqual(
-            [{k: v for k, v in f.items() if k != "selected"} for f in result], original
+            result,
+            [dict(original[0], selected=True), original[1], original[2]],
         )
 
     def test_file_id_list_selects_only_explicit_ids(self):
@@ -65,6 +69,16 @@ class FileSelectorTests(unittest.TestCase):
             {"field": "mtime", "op": "lte", "value": "2026-11-14T10:30:00Z"},
         ])
         self.assertEqual([f["selected"] for f in result], [True, False, False])
+
+    def test_modification_time_contains_checks_the_stored_utc_date(self):
+        # f_0002의 수정 시각은 한국 시각으로 11월 15일 오전 1시 30분이다.
+        file = self.files[1]
+        for date, expected in (("2026-11-14", True), ("2026-11-15", False)):
+            with self.subTest(date=date):
+                result = select_files([file], [
+                    {"field": "mtime", "op": "contains", "value": date},
+                ])
+                self.assertIs(result[0]["selected"], expected)
 
     def test_invalid_conditions_raise_instead_of_silently_selecting(self):
         for condition in (

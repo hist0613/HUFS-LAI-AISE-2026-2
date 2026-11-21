@@ -9,7 +9,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from drone_rl.pilot import MotorMixer
+from drone_rl.pilot import AttitudeController, MotorMixer
 
 
 def reset_drone(model, data):
@@ -188,3 +188,99 @@ def test_mixer_uses_model_motor_geometry(pilot_model):
     force, torque = applied_wrench(model, data, ctrl)
     np.testing.assert_allclose(force, [0, 0, 20], atol=1e-10)
     np.testing.assert_allclose(torque, [0.1, 0, 0.1], atol=1e-10)
+
+
+def axis_quaternion(axis, degrees):
+    half = np.deg2rad(degrees) / 2
+    quat = np.zeros(4)
+    quat[0], quat[axis + 1] = np.cos(half), np.sin(half)
+    return quat
+
+
+def attitude_state(data):
+    return {"quat": data.qpos[3:7].copy(), "angvel": data.qvel[3:6].copy()}
+
+
+@pytest.mark.parametrize("axis", [0, 1, 2])
+@pytest.mark.parametrize("degrees", [-10, 10])
+def test_attitude_recovers_within_three_seconds(pilot_model, pilot_data, axis, degrees):
+    m, d = pilot_model, pilot_data
+    controller = AttitudeController(m)
+    d.qpos[3:7] = axis_quaternion(axis, degrees)
+    thrust = m.body_subtreemass[m.body("x2").id] * np.linalg.norm(m.opt.gravity)
+    # Constant weight compensation isolates attitude control from altitude control.
+    for step in range(round(3 / m.opt.timestep)):
+        d.ctrl[:] = controller.act(thrust, [1, 0, 0, 0], attitude_state(d))
+        assert np.isfinite(d.ctrl).all() and np.all((0 <= d.ctrl) & (d.ctrl <= 13))
+        mujoco.mj_step(m, d)
+        assert d.ncon == 0  # Recovery must not be caused by ground contact.
+        if step * m.opt.timestep >= 2.5:
+            angle = 2 * np.arccos(np.clip(abs(d.qpos[3]), 0, 1))
+            assert angle < np.deg2rad(3)
+    assert np.linalg.norm(d.qvel[3:6]) < 0.05
+
+
+def test_attitude_tracks_nonzero_target(pilot_model, pilot_data):
+    m, d = pilot_model, pilot_data
+    controller = AttitudeController(m)
+    target = axis_quaternion(2, 90)
+    mujoco.mju_mulQuat(d.qpos[3:7], target, axis_quaternion(0, 10))
+    thrust = m.body_subtreemass[m.body("x2").id] * np.linalg.norm(m.opt.gravity)
+    for _ in range(round(3 / m.opt.timestep)):
+        d.ctrl[:] = controller.act(thrust, target, attitude_state(d))
+        mujoco.mj_step(m, d)
+        assert d.ncon == 0
+    angle = 2 * np.arccos(np.clip(abs(target @ d.qpos[3:7]), 0, 1))
+    assert angle < np.deg2rad(3)
+
+
+def test_attitude_damps_rotation(pilot_model, pilot_data):
+    controller = AttitudeController(pilot_model)
+    omega = np.array([0.1, -0.2, 0.05])
+    state = {"quat": [1, 0, 0, 0], "angvel": omega}
+    ctrl = controller.act(13, [1, 0, 0, 0], state)
+    _, torque = applied_wrench(pilot_model, pilot_data, ctrl)
+    assert omega @ torque < 0  # Damping removes rotational kinetic energy.
+
+
+@pytest.mark.parametrize("current_sign,target_sign", [(1, 1), (-1, 1), (1, -1), (-1, -1)])
+def test_attitude_quaternion_sign_equivalence(pilot_model, current_sign, target_sign):
+    controller = AttitudeController(pilot_model)
+    current, target = axis_quaternion(0, 10), axis_quaternion(2, 5)
+    omega = np.array([0.1, 0, 0])
+    expected = controller.act(13, target, {"quat": current, "angvel": omega})
+    actual = controller.act(13, target_sign * target,
+                            {"quat": current_sign * current, "angvel": omega})
+    np.testing.assert_allclose(actual, expected, atol=1e-12)
+
+
+def test_attitude_aligned_and_does_not_mutate_state(pilot_model):
+    controller = AttitudeController(pilot_model)
+    target = axis_quaternion(2, 30)
+    state = {"quat": target.copy(), "angvel": np.zeros(3)}
+    np.testing.assert_allclose(controller.act(13, target, state), np.full(4, 3.25))
+    np.testing.assert_array_equal(state["quat"], target)
+    np.testing.assert_array_equal(state["angvel"], np.zeros(3))
+
+
+@pytest.mark.parametrize("field,value", [
+    ("target", [0, 0, 0, 0]), ("target", [1, 0, 0]),
+    ("quat", [np.nan, 0, 0, 0]), ("quat", [2, 0, 0, 0]),
+    ("angvel", [0, 0]), ("angvel", [0, np.inf, 0]),
+])
+def test_attitude_rejects_bad_state(pilot_model, field, value):
+    controller = AttitudeController(pilot_model)
+    target = [1, 0, 0, 0]
+    state = {"quat": target, "angvel": [0, 0, 0]}
+    if field == "target":
+        target = value
+    else:
+        state[field] = value
+    with pytest.raises(ValueError):
+        controller.act(13, target, state)
+
+
+@pytest.mark.parametrize("frequency,damping", [(0, 1), (6, -1), (np.nan, 1), (6, np.inf)])
+def test_attitude_rejects_bad_gains(pilot_model, frequency, damping):
+    with pytest.raises(ValueError):
+        AttitudeController(pilot_model, frequency, damping)

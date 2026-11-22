@@ -1,7 +1,6 @@
 """파일 메타데이터와 조건 목록을 받아 selected 값을 계산한다."""
 
 import operator
-from datetime import datetime
 from typing import Any
 
 
@@ -15,30 +14,11 @@ _OPERATORS = {
 }
 
 
-def _parse_time(value: str) -> datetime:
-    # Python 3.10에서도 파일 수집기가 붙이는 UTC 접미사 Z를 처리한다.
-    if value.endswith("Z"):
-        value = value[:-1] + "+00:00"
-    result = datetime.fromisoformat(value)
-    if result.utcoffset() is None:
-        raise ValueError("mtime에는 Z 또는 +09:00 같은 시간대가 필요합니다.")
-    return result
-
-
 def _matches(file_info: dict[str, Any], condition: dict[str, Any]) -> bool:
     field, op, expected = condition["field"], condition["op"], condition["value"]
     if field not in file_info:
         return False
-    actual = file_info[field]
-
-    if field == "mtime" and op != "contains":
-        actual = _parse_time(actual)
-        expected = (
-            [_parse_time(value) for value in expected]
-            if op == "in" else _parse_time(expected)
-        )
-
-    return _OPERATORS[op](actual, expected)
+    return _OPERATORS[op](file_info[field], expected)
 
 
 def select_files(
@@ -47,10 +27,10 @@ def select_files(
 ) -> list[dict[str, Any]]:
     """각 파일의 selected(bool)를 다시 계산해 새 목록을 반환한다.
 
-    파일 수집기는 selected=False와 UTC mtime(예: 2026-11-14T16:30:00Z)을
-    전달한다. 반환값의 selected는 입력에 있는 값과 관계없이 조건으로 결정된다.
-    mtime의 contains는 저장된 UTC 문자열을 그대로 검사한다. 다른 연산자는
-    +09:00 같은 시간대가 지정된 조건값도 받아 실제 시각을 비교한다.
+    파일 수집기는 selected=False를 전달한다. 반환값의 selected는 조건으로 결정된다.
+    파일의 mtime과 시각을 비교하는 조건값(in의 각 원소 포함)은 모두 초 단위 UTC
+    문자열(YYYY-MM-DDTHH:MM:SSZ)이라고 가정한다. 이 형식에서는 문자열 순서가
+    시간 순서와 같다. contains는 날짜처럼 문자열의 일부를 검색한다.
 
     conditions 예시:
         [{"field": "ext", "op": "eq", "value": ".pdf"},

@@ -37,11 +37,12 @@ files = [
     },
 ]
 
-# 사용자 요구: "프로젝트A 폴더에 있는 PDF만 선택"
-# 두 조건을 모두 만족한 파일만 selected=True가 됩니다.
+# 사용자 요구: "UTC 기준 11월 14일 00:00:00부터 12:00:00까지 수정된 PDF 선택"
+# 시간 조건에는 파일의 mtime과 같은 초 단위 UTC 형식을 사용합니다.
 conditions = [
     {"field": "ext", "op": "eq", "value": ".pdf"},
-    {"field": "rel_path", "op": "contains", "value": "프로젝트A/"},
+    {"field": "mtime", "op": "gte", "value": "2026-11-14T00:00:00Z"},
+    {"field": "mtime", "op": "lte", "value": "2026-11-14T12:00:00Z"},
 ]
 
 

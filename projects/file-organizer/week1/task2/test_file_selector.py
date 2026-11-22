@@ -63,9 +63,9 @@ class FileSelectorTests(unittest.TestCase):
         ])
         self.assertEqual([f["selected"] for f in result], [True, False, True])
 
-    def test_modification_time_compares_instants_across_timezones(self):
+    def test_modification_time_filters_by_inclusive_utc_range(self):
         result = select_files(self.files, [
-            {"field": "mtime", "op": "gte", "value": "2026-11-14T19:30:00+09:00"},
+            {"field": "mtime", "op": "gte", "value": "2026-11-13T10:30:01Z"},
             {"field": "mtime", "op": "lte", "value": "2026-11-14T10:30:00Z"},
         ])
         self.assertEqual([f["selected"] for f in result], [True, False, False])

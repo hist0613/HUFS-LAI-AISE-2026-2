@@ -1,4 +1,4 @@
-"""실행 진입점. 기본 실행은 안내, --gui는 빈 화면, --cli는 미구현 안내."""
+"""실행 진입점. --demo는 Mock 흐름, 일반 --gui/--cli는 미구현 스켈레톤."""
 
 import argparse
 from pathlib import Path
@@ -10,10 +10,16 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--gui", action="store_true", help="GUI 기본 화면 열기")
     mode.add_argument("--cli", nargs=2, metavar=("SOURCE", "OUTPUT"), help="CLI 연결 지점")
+    parser.add_argument("--demo", action="store_true", help="Mock 데이터로 실행 (실제 파일 작업 없음)")
     args = parser.parse_args()
+    if args.demo and args.cli:
+        parser.error("--demo는 고정 샘플을 사용합니다. --cli 경로 옵션을 빼주세요.")
     if args.gui:
         from gui import launch
-        launch()
+        launch(demo=args.demo)
+    elif args.demo:
+        from demo import run_cli
+        run_cli()
     elif args.cli:
         from cli import run_cli
         try:
@@ -23,7 +29,7 @@ def main() -> int:
             return 1
     else:
         parser.print_help()
-        print("핵심 로직은 TODO입니다. GUI 화면만 실행할 수 있습니다.")
+        print("핵심 로직은 TODO입니다. --demo 또는 --gui --demo로 Mock 흐름을 확인하세요.")
     return 0
 
 

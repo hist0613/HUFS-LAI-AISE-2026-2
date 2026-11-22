@@ -45,18 +45,18 @@ def on_rollback() -> None:
     raise NotImplementedError("TODO: 선택 이력 되돌리기 연결")
 
 
-def launch() -> None:
+def launch(*, demo: bool = False) -> None:
     """최소 화면 실행. 폴더 선택/버튼 연결만 구현; 처리 이벤트는 명시적 TODO."""
     root = tk.Tk()
-    root.title("자동 파일 정리 — 통합 스켈레톤")
+    root.title("자동 파일 정리 — " + ("MOCK 데모 (실제 작업 없음)" if demo else "통합 스켈레톤"))
     root.geometry("900x600")
     source, output = tk.StringVar(), tk.StringVar()
     for label, variable in (("원본 폴더", source), ("결과 폴더", output)):
         row = ttk.Frame(root)
         row.pack(fill="x", padx=10, pady=5)
         ttk.Label(row, text=label, width=12).pack(side="left")
-        ttk.Entry(row, textvariable=variable).pack(side="left", fill="x", expand=True)
-        ttk.Button(row, text="선택", command=lambda v=variable: v.set(
+        ttk.Entry(row, textvariable=variable, state="readonly" if demo else "normal").pack(side="left", fill="x", expand=True)
+        ttk.Button(row, text="선택", state="disabled" if demo else "normal", command=lambda v=variable: v.set(
             filedialog.askdirectory(parent=root) or v.get())).pack(side="left")
 
     def invoke(callback: Callable[[], None]) -> None:
@@ -68,26 +68,35 @@ def launch() -> None:
 
     toolbar = ttk.Frame(root)
     toolbar.pack(fill="x", padx=10)
+    buttons = {}
     for text, callback in (
         ("파일 탐색", lambda: on_scan(source.get())),
         ("계획 미리보기", lambda: on_preview(source.get(), output.get())),
         ("승인 항목 실행", on_execute), ("실행 이력", on_history),
         ("선택 이력 되돌리기", on_rollback),
     ):
-        ttk.Button(toolbar, text=text, command=lambda fn=callback: invoke(fn)).pack(side="left")
-    ttk.Label(root, text="미구현 스켈레톤: 아래 표는 비어 있으며 실제 파일 작업은 수행하지 않습니다.").pack(pady=8)
+        buttons[text] = ttk.Button(toolbar, text=text, command=lambda fn=callback: invoke(fn))
+        buttons[text].pack(side="left")
+    ttk.Label(root, text=("MOCK: 파일 행 더블클릭 → 미리보기 → 오른쪽 행 더블클릭 승인 → 실행 (파일 변경 없음)"
+                         if demo else "미구현 스켈레톤: 실제 파일 작업은 수행하지 않습니다.")).pack(pady=8)
     files = ttk.Treeview(root, columns=("selected", "file"), show="headings", height=5)
     files.heading("selected", text="선택 (체크박스 연결 TODO)")
     files.heading("file", text="탐색된 파일")
     files.pack(fill="x", padx=10)
     comparison = ttk.Frame(root)
     comparison.pack(fill="both", expand=True, padx=10, pady=8)
+    comparison_trees = []
     for title in ("정리 전", "정리 후 · 이름 충돌/경로 수정/승인 TODO"):
         panel = ttk.LabelFrame(comparison, text=title)
         panel.pack(side="left", fill="both", expand=True)
-        ttk.Treeview(panel).pack(fill="both", expand=True)
+        tree = ttk.Treeview(panel)
+        tree.pack(fill="both", expand=True)
+        comparison_trees.append(tree)
     history = ttk.Treeview(root, columns=("status", "message"), show="headings", height=4)
     history.heading("status", text="실행 상태")
     history.heading("message", text="기록 / 충돌 안내")
     history.pack(fill="x", padx=10, pady=8)
+    if demo:
+        from demo import connect_gui
+        connect_gui(source, output, files, *comparison_trees, history, buttons)
     root.mainloop()

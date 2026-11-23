@@ -1,4 +1,4 @@
-"""Low-level X2 motor allocation; attitude and maneuver control follow later."""
+"""X2 motor allocation and attitude stabilization; guidance follows later."""
 
 import mujoco
 import numpy as np
@@ -70,3 +70,50 @@ class MotorMixer:
         ratios = np.divide(room, np.abs(delta), out=np.ones(4), where=delta != 0)
         scale = min(1.0, float(ratios.min()))
         return np.clip(collective + scale * delta, 0, self.max_thrust)
+
+
+class AttitudeController:
+    """Track a fixed body->world wxyz attitude with zero target angular rate.
+
+    State uses the team's quat/angvel keys; angvel is body-frame rad/s.
+    Natural frequency is in rad/s. This controller does not regulate altitude.
+    Call act once per physics step; the caller supplies total thrust in N.
+    """
+
+    def __init__(self, model, natural_frequency=6.0, damping_ratio=1.0):
+        gains = np.asarray([natural_frequency, damping_ratio], dtype=float)
+        if gains.shape != (2,) or not np.isfinite(gains).all() or np.any(gains <= 0):
+            raise ValueError("Expected positive finite frequency and damping")
+        self.mixer = MotorMixer(model)
+        body = model.body("x2").id
+        rotation = np.empty(9)
+        mujoco.mju_quat2Mat(rotation, model.body_iquat[body])
+        rotation = rotation.reshape(3, 3)
+        # Principal inertia is expressed in the inertial frame, not body axes.
+        self._inertia = rotation @ np.diag(model.body_inertia[body]) @ rotation.T
+        self._kp = natural_frequency**2
+        self._kd = 2 * damping_ratio * natural_frequency
+
+    @staticmethod
+    def _quaternion(value):
+        quat = np.asarray(value, dtype=float)
+        if quat.shape != (4,) or not np.isfinite(quat).all():
+            raise ValueError("Expected a finite wxyz quaternion")
+        norm = np.linalg.norm(quat)
+        if not np.isclose(norm, 1.0, rtol=0, atol=1e-6):
+            raise ValueError("Expected a unit quaternion")
+        return quat / norm
+
+    def act(self, thrust_n, target_quat, drone_state):
+        """Return four motor thrusts using shortest-rotation PD feedback."""
+        target = self._quaternion(target_quat)
+        current = self._quaternion(drone_state["quat"])
+        omega = np.asarray(drone_state["angvel"], dtype=float)
+        if omega.shape != (3,) or not np.isfinite(omega).all():
+            raise ValueError("Expected three finite body angular velocities")
+        error = np.empty(3)
+        mujoco.mju_subQuat(error, target, current)
+        with np.errstate(over="ignore", invalid="ignore"):
+            torque = self._inertia @ (self._kp * error - self._kd * omega)
+            torque += np.cross(omega, self._inertia @ omega)
+        return self.mixer.mix(thrust_n, torque)

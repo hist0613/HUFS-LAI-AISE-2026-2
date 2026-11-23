@@ -1,6 +1,6 @@
 """실행 진입점. --demo는 Mock 흐름, 일반 --gui/--cli는 미구현 스켈레톤."""
 
-import argparse
+import argparse, os
 from pathlib import Path
 
 
@@ -14,12 +14,17 @@ def main() -> int:
     args = parser.parse_args()
     if args.demo and args.cli:
         parser.error("--demo는 고정 샘플을 사용합니다. --cli 경로 옵션을 빼주세요.")
-    if args.gui:
+
+    not_headless = os.name != "posix" or os.environ.get("DISPLAY") is not None
+    if args.gui and not_headless:
         from gui import launch
 
         launch(demo=args.demo)
     elif args.demo:
         from demo import run_cli
+
+        if args.gui:
+            print(f"headless 환경이므로, cli로 재개합니다.")
 
         run_cli()
     elif args.cli:

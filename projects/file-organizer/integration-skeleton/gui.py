@@ -55,9 +55,15 @@ def launch(*, demo: bool = False) -> None:
         row = ttk.Frame(root)
         row.pack(fill="x", padx=10, pady=5)
         ttk.Label(row, text=label, width=12).pack(side="left")
-        ttk.Entry(row, textvariable=variable, state="readonly" if demo else "normal").pack(side="left", fill="x", expand=True)
-        ttk.Button(row, text="선택", state="disabled" if demo else "normal", command=lambda v=variable: v.set(
-            filedialog.askdirectory(parent=root) or v.get())).pack(side="left")
+        ttk.Entry(row, textvariable=variable, state="readonly" if demo else "normal").pack(
+            side="left", fill="x", expand=True
+        )
+        ttk.Button(
+            row,
+            text="선택",
+            state="disabled" if demo else "normal",
+            command=lambda v=variable: v.set(filedialog.askdirectory(parent=root) or v.get()),
+        ).pack(side="left")
 
     def invoke(callback: Callable[[], None]) -> None:
         """UI 경계에서만 미구현/기본 오류를 표시한다."""
@@ -72,13 +78,20 @@ def launch(*, demo: bool = False) -> None:
     for text, callback in (
         ("파일 탐색", lambda: on_scan(source.get())),
         ("계획 미리보기", lambda: on_preview(source.get(), output.get())),
-        ("승인 항목 실행", on_execute), ("실행 이력", on_history),
+        ("승인 항목 실행", on_execute),
+        ("실행 이력", on_history),
         ("선택 이력 되돌리기", on_rollback),
     ):
         buttons[text] = ttk.Button(toolbar, text=text, command=lambda fn=callback: invoke(fn))
         buttons[text].pack(side="left")
-    ttk.Label(root, text=("MOCK: 파일 행 더블클릭 → 미리보기 → 오른쪽 행 더블클릭 승인 → 실행 (파일 변경 없음)"
-                         if demo else "미구현 스켈레톤: 실제 파일 작업은 수행하지 않습니다.")).pack(pady=8)
+    ttk.Label(
+        root,
+        text=(
+            "MOCK: 파일 행 더블클릭 → 미리보기 → 오른쪽 행 더블클릭 승인 → 실행 (파일 변경 없음)"
+            if demo
+            else "미구현 스켈레톤: 실제 파일 작업은 수행하지 않습니다."
+        ),
+    ).pack(pady=8)
     files = ttk.Treeview(root, columns=("selected", "file"), show="headings", height=5)
     files.heading("selected", text="선택 (체크박스 연결 TODO)")
     files.heading("file", text="탐색된 파일")
@@ -98,5 +111,6 @@ def launch(*, demo: bool = False) -> None:
     history.pack(fill="x", padx=10, pady=8)
     if demo:
         from demo import connect_gui
+
         connect_gui(source, output, files, *comparison_trees, history, buttons)
     root.mainloop()

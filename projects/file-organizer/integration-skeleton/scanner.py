@@ -3,8 +3,9 @@
 from models import ScannedFile
 
 
-def scan_files(source_root: str, *, max_depth: int | None = None,
-               exclude_dirs: tuple[str, ...] = ()) -> list[ScannedFile]:
+def scan_files(
+    source_root: str, *, max_depth: int | None = None, exclude_dirs: tuple[str, ...] = ()
+) -> list[ScannedFile]:
     """절대 원본 경로 -> 파일 목록. rel_path는 '/' 상대 경로, selected=False.
 
     TODO: 숨김/시스템/.git 제외, 심링크 디렉터리 미추적, 안정적인 ID 부여.

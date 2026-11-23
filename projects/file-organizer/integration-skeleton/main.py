@@ -16,12 +16,15 @@ def main() -> int:
         parser.error("--demo는 고정 샘플을 사용합니다. --cli 경로 옵션을 빼주세요.")
     if args.gui:
         from gui import launch
+
         launch(demo=args.demo)
     elif args.demo:
         from demo import run_cli
+
         run_cli()
     elif args.cli:
         from cli import run_cli
+
         try:
             run_cli(*(str(Path(path).resolve()) for path in args.cli))
         except (NotImplementedError, ValueError, OSError, RuntimeError) as error:

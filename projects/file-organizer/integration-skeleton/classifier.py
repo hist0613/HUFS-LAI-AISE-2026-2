@@ -31,8 +31,7 @@ def classify_llm(request: LLMRequest, *, endpoint: str, model: str) -> list[Plan
     raise NotImplementedError("TODO: classify_llm")
 
 
-def classify_hybrid(request: LLMRequest, rules: list[Rule], *,
-                    endpoint: str, model: str) -> list[PlanItem]:
+def classify_hybrid(request: LLMRequest, rules: list[Rule], *, endpoint: str, model: str) -> list[PlanItem]:
     """3주차 선택 기능: 규칙 일치 결과 + 미일치 파일의 LLM 계획.
 
     TODO(선택): 미일치 파일/본문만 재구성해서 전송; 중복 없이 고유 plan_id 부여.

@@ -3,8 +3,9 @@
 from models import Excerpt, LLMRequest, ScannedFile
 
 
-def extract_excerpts(source_root: str, files: list[ScannedFile], *,
-                     allowed_ids: list[str], max_chars: int) -> list[Excerpt]:
+def extract_excerpts(
+    source_root: str, files: list[ScannedFile], *, allowed_ids: list[str], max_chars: int
+) -> list[Excerpt]:
     """선택 파일 중 허용 ID -> TXT/MD/PDF/DOCX 앞부분. max_chars는 파일당 양수.
 
     TODO: 명시적으로 허용한 파일만 읽기. 미허용 파일은 결과에도 넣지 않는다.
@@ -14,8 +15,7 @@ def extract_excerpts(source_root: str, files: list[ScannedFile], *,
     raise NotImplementedError("TODO: extract_excerpts")
 
 
-def build_llm_request(files: list[ScannedFile], output_root: str,
-                      excerpts: list[Excerpt]) -> LLMRequest:
+def build_llm_request(files: list[ScannedFile], output_root: str, excerpts: list[Excerpt]) -> LLMRequest:
     """선택 목록 + 추출 결과 -> 전송 전 검토할 JSON 객체. 네트워크 요청 없음.
 
     TODO: selected=True만 포함; 출력 하위 폴더는 상대 경로로 수집.

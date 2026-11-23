@@ -6,10 +6,18 @@ import safety
 from models import Action, LLMRequest, Method, Plan, Rule, ScannedFile
 
 
-def create_plan(source_root: str, output_root: str, files: list[ScannedFile],
-                rules: list[Rule], *, action: Action = "symlink",
-                method: Method = "rules", request: LLMRequest | None = None,
-                endpoint: str = "", model: str = "") -> Plan:
+def create_plan(
+    source_root: str,
+    output_root: str,
+    files: list[ScannedFile],
+    rules: list[Rule],
+    *,
+    action: Action = "symlink",
+    method: Method = "rules",
+    request: LLMRequest | None = None,
+    endpoint: str = "",
+    model: str = ""
+) -> Plan:
     """선택 파일 -> 미승인 계획. LLM request는 전송 동의 후에만 전달한다.
 
     연결 코드만 구현됨. TODO(담당 모듈): 분류/검증/충돌 해결 본체 채우기.
@@ -30,7 +38,9 @@ def create_plan(source_root: str, output_root: str, files: list[ScannedFile],
     else:
         raise ValueError("지원하지 않는 분류 방식")
     plan: Plan = {
-        "source_root": source_root, "output_root": output_root, "files": selected,
+        "source_root": source_root,
+        "output_root": output_root,
+        "files": selected,
         "items": [{**item, "action": action, "approved": False} for item in items],
     }
     return prepare_review(plan)

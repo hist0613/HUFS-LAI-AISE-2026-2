@@ -9,49 +9,81 @@ from models import JournalEntry, Plan, PlanItem, Rule, ScannedFile
 
 SOURCE, OUTPUT = "/DEMO/source", "/DEMO/output"
 STAMP = "2026-11-22T00:00:00Z"
-SAMPLES = {"f_0001": ("보고서.pdf", "문서/보고서.pdf"),
-           "f_0002": ("사진.jpg", "사진/사진.jpg"),
-           "f_0003": ("메모.txt", "문서/메모.txt")}
+SAMPLES = {
+    "f_0001": ("보고서.pdf", "문서/보고서.pdf"),
+    "f_0002": ("사진.jpg", "사진/사진.jpg"),
+    "f_0003": ("메모.txt", "문서/메모.txt"),
+}
 
 
 def sample_files() -> list[ScannedFile]:
     """매번 독립적인 미선택 샘플 목록을 반환한다. 실제 폴더를 읽지 않는다."""
-    return [{"file_id": key, "rel_path": name, "name": name,
-             "ext": PurePosixPath(name).suffix, "size_bytes": 100, "mtime": STAMP,
-             "selected": False} for key, (name, _) in SAMPLES.items()]
+    return [
+        {
+            "file_id": key,
+            "rel_path": name,
+            "name": name,
+            "ext": PurePosixPath(name).suffix,
+            "size_bytes": 100,
+            "mtime": STAMP,
+            "selected": False,
+        }
+        for key, (name, _) in SAMPLES.items()
+    ]
 
 
 def classify(files: list[ScannedFile], rules: list[Rule]) -> list[PlanItem]:
     """분류 알고리즘 대신 선택 샘플에 대응하는 고정 목적지를 반환한다."""
-    return [{"plan_id": "p_" + file["file_id"], "file_id": file["file_id"],
-             "action": "symlink", "target_rel_path": SAMPLES[file["file_id"]][1],
-             "reason": "MOCK: 고정 샘플 분류", "approved": False}
-            for file in files if file["selected"]]
+    return [
+        {
+            "plan_id": "p_" + file["file_id"],
+            "file_id": file["file_id"],
+            "action": "symlink",
+            "target_rel_path": SAMPLES[file["file_id"]][1],
+            "reason": "MOCK: 고정 샘플 분류",
+            "approved": False,
+        }
+        for file in files
+        if file["selected"]
+    ]
 
 
 def create_plan(files: list[ScannedFile]) -> Plan:
     """실제 workflow 연결에 가짜 분류/검증을 잠시 공급한다. 종료 시 원복한다."""
-    with patch("safety.validate_roots"), patch("safety.validate_plan"), \
-         patch("classifier.classify_rules", side_effect=classify), \
-         patch("planner.resolve_conflicts", side_effect=lambda plan: plan):
+    with patch("safety.validate_roots"), patch("safety.validate_plan"), patch(
+        "classifier.classify_rules", side_effect=classify
+    ), patch("planner.resolve_conflicts", side_effect=lambda plan: plan):
         return workflow.create_plan(SOURCE, OUTPUT, files, [])
 
 
 def execute(plan: Plan) -> list[JournalEntry]:
     """승인 항목의 가짜 성공 기록만 반환한다. 파일/심링크/기록 파일 생성 없음."""
     files = {file["file_id"]: file for file in plan["files"]}
-    return [{"job_id": "MOCK_JOB", "seq_no": index, "plan_id": item["plan_id"],
-             "file_id": item["file_id"], "src_abs_path": SOURCE + "/" + files[item["file_id"]]["rel_path"],
-             "dst_abs_path": OUTPUT + "/" + item["target_rel_path"], "action": item["action"],
-             "status": "COMMITTED", "timestamp": STAMP, "created_dirs": [],
-             "message": "MOCK: 실제 파일 작업 없음"}
-            for index, item in enumerate((i for i in plan["items"] if i["approved"]), 1)]
+    return [
+        {
+            "job_id": "MOCK_JOB",
+            "seq_no": index,
+            "plan_id": item["plan_id"],
+            "file_id": item["file_id"],
+            "src_abs_path": SOURCE + "/" + files[item["file_id"]]["rel_path"],
+            "dst_abs_path": OUTPUT + "/" + item["target_rel_path"],
+            "action": item["action"],
+            "status": "COMMITTED",
+            "timestamp": STAMP,
+            "created_dirs": [],
+            "message": "MOCK: 실제 파일 작업 없음",
+        }
+        for index, item in enumerate((i for i in plan["items"] if i["approved"]), 1)
+    ]
 
 
 def rollback(entries: list[JournalEntry]) -> list[JournalEntry]:
     """데모 결과의 원복 표시만 반환한다. 실제 복구 알고리즘이 아니다."""
-    return [{**entry, "status": "ROLLED_BACK", "message": "MOCK: 가짜 되돌리기"}
-            for entry in reversed(entries) if entry["status"] == "COMMITTED"]
+    return [
+        {**entry, "status": "ROLLED_BACK", "message": "MOCK: 가짜 되돌리기"}
+        for entry in reversed(entries)
+        if entry["status"] == "COMMITTED"
+    ]
 
 
 def run_cli() -> None:
@@ -75,11 +107,18 @@ def run_cli() -> None:
         print("MOCK 원복 결과:", rollback(entries))
 
 
-def connect_gui(source: StringVar, output: StringVar, files_view: ttk.Treeview,
-                before: ttk.Treeview, after: ttk.Treeview, history: ttk.Treeview,
-                buttons: dict[str, ttk.Button]) -> None:
+def connect_gui(
+    source: StringVar,
+    output: StringVar,
+    files_view: ttk.Treeview,
+    before: ttk.Treeview,
+    after: ttk.Treeview,
+    history: ttk.Treeview,
+    buttons: dict[str, ttk.Button],
+) -> None:
     """기존 GUI 위젯에 데모 이벤트를 연결한다. 상태는 창별로 메모리에만 보관."""
     from tkinter import messagebox
+
     files, plan, entries = sample_files(), None, []
     source.set(SOURCE)
     output.set(OUTPUT)
@@ -133,7 +172,9 @@ def connect_gui(source: StringVar, output: StringVar, files_view: ttk.Treeview,
     def apply():
         nonlocal plan, entries
         if plan is None or not any(item["approved"] for item in plan["items"]):
-            messagebox.showinfo("MOCK", "파일 선택 → 미리보기 → 오른쪽 항목 승인 후 실행하세요.", parent=files_view.winfo_toplevel())
+            messagebox.showinfo(
+                "MOCK", "파일 선택 → 미리보기 → 오른쪽 항목 승인 후 실행하세요.", parent=files_view.winfo_toplevel()
+            )
             return
         entries = execute(plan)
         plan = None  # 같은 승인으로 중복 실행하지 않음.
@@ -148,8 +189,12 @@ def connect_gui(source: StringVar, output: StringVar, files_view: ttk.Treeview,
 
     files_view.bind("<Double-1>", select)
     after.bind("<Double-1>", approve)
-    for text, callback in (("파일 탐색", scan), ("계획 미리보기", preview),
-                           ("승인 항목 실행", apply), ("실행 이력", show_history),
-                           ("선택 이력 되돌리기", undo)):
+    for text, callback in (
+        ("파일 탐색", scan),
+        ("계획 미리보기", preview),
+        ("승인 항목 실행", apply),
+        ("실행 이력", show_history),
+        ("선택 이력 되돌리기", undo),
+    ):
         buttons[text].configure(command=callback)
     scan()

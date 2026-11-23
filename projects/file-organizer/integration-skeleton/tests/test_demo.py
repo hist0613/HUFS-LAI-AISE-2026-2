@@ -14,11 +14,13 @@ class DemoTests(unittest.TestCase):
     def test_selected_and_approved_only_without_io(self):
         files = demo.sample_files()
         files[0]["selected"] = files[2]["selected"] = True
-        with patch("builtins.open", side_effect=AssertionError("file I/O")), \
-             patch("os.symlink", side_effect=AssertionError("symlink")), \
-             patch("os.rename", side_effect=AssertionError("move")), \
-             patch("socket.socket", side_effect=AssertionError("network")), \
-             patch.object(executor, "execute_plan", side_effect=AssertionError("real executor")):
+        with patch("builtins.open", side_effect=AssertionError("file I/O")), patch(
+            "os.symlink", side_effect=AssertionError("symlink")
+        ), patch("os.rename", side_effect=AssertionError("move")), patch(
+            "socket.socket", side_effect=AssertionError("network")
+        ), patch.object(
+            executor, "execute_plan", side_effect=AssertionError("real executor")
+        ):
             plan = demo.create_plan(files)
             self.assertEqual([item["file_id"] for item in plan["items"]], ["f_0001", "f_0003"])
             self.assertFalse(any(item["approved"] for item in plan["items"]))
@@ -40,8 +42,9 @@ class DemoTests(unittest.TestCase):
             safety.validate_plan(demo.create_plan([]))
 
     def test_cli_selection_approval_and_rollback(self):
-        with patch("builtins.input", side_effect=["f_0001 f_0002", "f_0002", "y"]), \
-             patch("sys.stdout", new_callable=io.StringIO) as output:
+        with patch("builtins.input", side_effect=["f_0001 f_0002", "f_0002", "y"]), patch(
+            "sys.stdout", new_callable=io.StringIO
+        ) as output:
             demo.run_cli()
         self.assertIn("COMMITTED", output.getvalue())
         self.assertIn("ROLLED_BACK", output.getvalue())

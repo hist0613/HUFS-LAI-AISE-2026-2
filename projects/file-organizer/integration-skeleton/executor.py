@@ -8,8 +8,7 @@ MOVE_WARNING = (
 )
 
 
-def execute_plan(plan: Plan, journal_path: str, *,
-                 move_confirmed: bool = False) -> list[JournalEntry]:
+def execute_plan(plan: Plan, journal_path: str, *, move_confirmed: bool = False) -> list[JournalEntry]:
     """승인 계획 + 절대 JSONL 기록 경로 -> 이번 호출에서 추가한 실행 기록.
 
     TODO: validate_plan/권한 재점검, 승인 항목만 실행, 직전 상태/충돌 재확인.
@@ -21,8 +20,7 @@ def execute_plan(plan: Plan, journal_path: str, *,
     raise NotImplementedError("TODO: execute_plan")
 
 
-def resume_job(plan: Plan, journal_path: str, *,
-               move_confirmed: bool = False) -> list[JournalEntry]:
+def resume_job(plan: Plan, journal_path: str, *, move_confirmed: bool = False) -> list[JournalEntry]:
     """저장 계획 + 기존 기록 -> 이번 재개에서 추가한 기록.
 
     TODO: 기록/계획 일치 확인, PENDING의 실제 상태 대조, 완료 항목 건너뛰기.

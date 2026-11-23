@@ -2,7 +2,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from drone_rl.sim import Sim
+from drone_rl.sim import ROVER_SPEED, ROVER_START_X, Sim, _rover_pose
 
 
 @pytest.fixture
@@ -20,11 +20,64 @@ def test_course_and_initial_state(sim):
     course_geoms = ("beam", "finish_beam", "left_pillar", "right_pillar", "rear_pillar", "floor")
     assert all(m.geom(name).id >= 0 for name in course_geoms)
     assert [m.actuator(i).name for i in range(m.nu)] == [f"thrust{i}" for i in range(1, 5)]
-    np.testing.assert_array_equal(state["pos"], [0, 0, 1.6])
+    x, y, z = state["pos"]
+    assert -0.3 <= x <= 0.3
+    assert -0.5 <= y <= 0.5
+    assert z == 1.6
     np.testing.assert_array_equal(state["quat"], [1, 0, 0, 0])
     np.testing.assert_array_equal(state["vel"], [0, 0, 0])
     np.testing.assert_array_equal(state["angvel"], [0, 0, 0])
     assert sim.t == sim.collisions == sim.data.ncon == 0
+
+
+def test_seed_reproduces_spawn_and_optional_pillars(sim):
+    same_seed = Sim(seed=7, randomize_obstacles=True)
+    repeated = Sim(seed=7, randomize_obstacles=True)
+    other_seed = Sim(seed=8, randomize_obstacles=True)
+    fixed_course = Sim(seed=8)
+    np.testing.assert_array_equal(sim.drone_state["pos"], same_seed.drone_state["pos"])
+    np.testing.assert_array_equal(same_seed.drone_state["pos"], repeated.drone_state["pos"])
+    np.testing.assert_array_equal(fixed_course.drone_state["pos"], other_seed.drone_state["pos"])
+    assert not np.array_equal(sim.drone_state["pos"], other_seed.drone_state["pos"])
+
+    for name in ("beam", "finish_beam", "left_pillar", "right_pillar", "rear_pillar"):
+        base = sim.model.geom(name).pos
+        randomized = same_seed.model.geom(name).pos
+        np.testing.assert_array_equal(base, fixed_course.model.geom(name).pos)
+        np.testing.assert_array_equal(randomized, repeated.model.geom(name).pos)
+        assert not np.array_equal(base, randomized)
+        assert not np.array_equal(randomized, other_seed.model.geom(name).pos)
+        assert randomized[2] == base[2]
+
+
+def test_shuffled_courses_leave_a_drone_passage():
+    names = ("beam", "finish_beam", "left_pillar", "right_pillar", "rear_pillar")
+    orders = []
+    for seed in range(30):
+        sim = Sim(seed, randomize_obstacles=True)
+        obstacles = [sim.model.geom(name) for name in names]
+        by_x = sorted(obstacles, key=lambda geom: geom.pos[0])
+        orders.append(tuple(geom.name in names[:2] for geom in by_x))
+        assert np.min(np.diff([geom.pos[0] for geom in by_x])) >= 1.52
+        drone_geoms = np.flatnonzero(sim.model.geom_bodyid == sim.model.body("x2").id)
+        start = sim.drone_state["pos"]
+        # 실제 X2 형상을 차량 경로 위로 이동시키며 빔 앞에서 상승하고 뒤에서 내려온다.
+        for x in np.arange(start[0], 12.01, 0.04):
+            fraction = np.clip((x - start[0]) / (ROVER_START_X - start[0]), 0, 1)
+            _, y, yaw = _rover_pose(max(0, (x - ROVER_START_X) / ROVER_SPEED))
+            beam_distance = min(abs(x - beam.pos[0]) for beam in obstacles[:2])
+            ramp = np.clip((1.7 - beam_distance) / 1.2, 0, 1)
+            height = 1.6 + 0.8 * ramp**2 * (3 - 2 * ramp)
+            sim.data.qpos[sim._q:sim._q + 7] = [
+                x, y + (1 - fraction) * start[1], height, np.cos(yaw / 2), 0, 0, np.sin(yaw / 2),
+            ]
+            mujoco.mj_forward(sim.model, sim.data)
+            for obstacle in obstacles:
+                for part in drone_geoms:
+                    gap = mujoco.mj_geomDistance(sim.model, sim.data, part, obstacle.id, 1.0, None)
+                    assert gap > 0.1, (seed, x, obstacle.name, gap)
+    for first in range(0, 30, 10):
+        assert len(set(orders[first:first + 10])) == 10
 
 
 def test_free_fall_and_target_motion(sim):
@@ -40,7 +93,9 @@ def test_free_fall_and_target_motion(sim):
     assert sim.collisions == 0
 
 
-def test_rover_weaves_past_obstacles_without_overlap(sim):
+@pytest.mark.parametrize("seed, randomize_obstacles", [(7, False)] + [(seed, True) for seed in range(30)])
+def test_rover_weaves_past_obstacles_without_overlap(seed, randomize_obstacles):
+    sim = Sim(seed, randomize_obstacles=randomize_obstacles)
     model, data = sim.model, sim.data
     rover = data.body("target")
     rover_geoms = np.flatnonzero(model.geom_bodyid == rover.id)

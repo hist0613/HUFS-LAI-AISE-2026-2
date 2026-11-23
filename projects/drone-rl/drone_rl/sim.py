@@ -1,5 +1,6 @@
-"""MuJoCo Menagerie의 Skydio X2 드론 모델을 사용하는 고정 장애물 코스."""
+"""MuJoCo Menagerie의 Skydio X2 드론 모델을 사용하는 장애물 코스."""
 
+from itertools import combinations
 import math
 import os
 
@@ -22,6 +23,12 @@ _ROVER_WAYPOINTS = np.array([
     [11.5, 0.0],
     [ROVER_FINISH_X, 0.0],
 ])
+_PILLAR_NAMES = ("left_pillar", "right_pillar", "rear_pillar")
+_PILLAR_XY = np.array([[7.0, 0.8], [9.0, -0.8], [10.5, 0.8]])
+_PILLAR_RADIUS = 0.25
+# 차량 중심에서 가장 먼 바퀴 외곽까지의 수평 거리를 올림한 값.
+_ROVER_FOOTPRINT_RADIUS = 0.26
+_ROVER_PILLAR_CLEARANCE = 0.10
 
 
 def _model_path():
@@ -44,11 +51,46 @@ def _rover_pose(time):
     return x, start_y + (end_y - start_y) * blend, math.atan(slope)
 
 
+def _random_course(seed, rng):
+    # 연속된 시드 10개(0~9, 10~19, ...)에 빔 구간 조합을 한 번씩 배정한다.
+    orders = list(combinations(range(5), 2))
+    if isinstance(seed, (int, np.integer)):
+        block, index = divmod(int(seed), len(orders))
+        order_rng = np.random.default_rng([block, 517])
+        beam_slots = orders[order_rng.permutation(len(orders))[index]]
+    else:
+        beam_slots = orders[rng.integers(len(orders))]
+
+    slots = np.linspace(2.5, 11.0, 5) + rng.uniform(-0.30, 0.30, 5)
+    beam_x = slots[list(beam_slots)]
+    pillar_x = np.delete(slots, beam_slots)
+    pillars = []
+    # 경로의 굽은 부분까지 포함해 차량 및 드론이 지날 통로를 확보한다.
+    # 기둥의 x에서 이 반경보다 먼 경로점은 x 거리만으로도 충분히 떨어져 있다.
+    corridor = max(0.80, _PILLAR_RADIUS + _ROVER_FOOTPRINT_RADIUS + _ROVER_PILLAR_CLEARANCE)
+    for x, side in zip(pillar_x, rng.permutation([1, -1, rng.choice([-1, 1])])):
+        lo = max(ROVER_START_X, x - corridor)
+        hi = min(ROVER_FINISH_X, x + corridor)
+        # 경유점 사이에서 y는 단조로 변하므로 양 끝과 내부 경유점에서 극값을 얻는다.
+        ys = [_rover_pose((edge - ROVER_START_X) / ROVER_SPEED)[1] for edge in (lo, hi)]
+        ys.extend(y for wx, y in _ROVER_WAYPOINTS if lo < wx < hi)
+        edge_y = max(ys) if side > 0 else min(ys)
+        pillars.append((x, edge_y + side * (corridor + rng.uniform(0, 0.45))))
+    return beam_x, pillars
+
+
 class Sim:
     """모터 4개의 추력을 한 번 입력할 때마다 시뮬레이션을 2밀리초 진행"""
 
-    def __init__(self, seed):
-        self.seed = seed  # 이후 장애물 배치를 재현할 때 쓰기 위해 저장해 둔다.
+    def __init__(self, seed, *, randomize_obstacles=False):
+        self.seed = seed
+        spawn_seed, obstacle_seed = np.random.SeedSequence(seed).spawn(2)
+        spawn_rng = np.random.default_rng(spawn_seed)
+        spawn_x, spawn_y = spawn_rng.uniform([-0.3, -0.5], [0.3, 0.5])
+        beam_x = (2.0, 11.5)
+        pillar_positions = _PILLAR_XY
+        if randomize_obstacles:
+            beam_x, pillar_positions = _random_course(seed, np.random.default_rng(obstacle_seed))
         spec = mujoco.MjSpec.from_file(str(_model_path()))
         spec.option.timestep = 0.002
         world = spec.worldbody
@@ -78,15 +120,14 @@ class Sim:
                        material="course_floor")
 
         # 코스 양쪽 바깥까지 빔을 뻗어 코스 안에서 옆으로 돌아갈 틈을 없앤다.
-        for name, x in [("beam", 2), ("finish_beam", 11.5)]:
+        for name, x in zip(("beam", "finish_beam"), beam_x):
             world.add_geom(name=name, type=geom.mjGEOM_CYLINDER,
                            fromto=[x, -45, 1.6, x, 45, 1.6], size=[0.15],
                            group=OBSTACLE_GEOM_GROUP,
                            rgba=[1, 0.72, 0.05, 1])
-        for name, x, y in [("left_pillar", 7, 0.8), ("right_pillar", 9, -0.8),
-                           ("rear_pillar", 10.5, 0.8)]:
+        for name, (x, y) in zip(_PILLAR_NAMES, pillar_positions):
             world.add_geom(name=name, type=geom.mjGEOM_CYLINDER, pos=[x, y, 1.25],
-                           size=[0.25, 1.25], group=OBSTACLE_GEOM_GROUP, rgba=[0.76, 0.77, 0.80, 1])
+                           size=[_PILLAR_RADIUS, 1.25], group=OBSTACLE_GEOM_GROUP, rgba=[0.76, 0.77, 0.80, 1])
 
         # 차량은 드론 앞에서 출발해 두 빔 아래와 세 기둥 사이를 지나간다.
         target = world.add_body(name="target", mocap=True, pos=[ROVER_START_X, 0, 0.1])
@@ -108,7 +149,7 @@ class Sim:
         self._v = self.model.jnt_dofadr[joint]
         self._target = self.model.body_mocapid[self.model.body("target").id]
         # jev-drone 기본 코스와 같은 높이에서 시작한다.
-        self.model.qpos0[self._q:self._q + 3] = [0, 0, 1.6]
+        self.model.qpos0[self._q:self._q + 3] = [spawn_x, spawn_y, 1.6]
         self.data = mujoco.MjData(self.model)
         mujoco.mj_forward(self.model, self.data)
         self._target_unseen_since_s = None

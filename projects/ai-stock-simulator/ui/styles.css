@@ -10,6 +10,10 @@
   --down: #1d63d8;
   --up-solid: #e0242e;
   --down-solid: #2a6be0;
+  --up-tint: #fdf1f1;
+  --down-tint: #eff4fd;
+  --up-bar: #e0242e24;
+  --down-bar: #2a6be024;
   --buy: #e0242e;
   --sell: #1d63d8;
   font: 100%/1.5 Pretendard, system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
@@ -30,6 +34,10 @@
     --down: #5a92ff;
     --up-solid: #f0444c;
     --down-solid: #3d7ef0;
+    --up-tint: #2a1a1c;
+    --down-tint: #181f2e;
+    --up-bar: #f0444c38;
+    --down-bar: #3d7ef038;
   }
 }
 
@@ -44,7 +52,7 @@ button:disabled { cursor: default; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .up { color: var(--up); }
 .down { color: var(--down); }
-.quote, .stats, .legend, .asset-list, .order-summary, .stock-quote, .stepper input { font-variant-numeric: tabular-nums; }
+.quote, .stats, .legend, .book-table, .asset-list, .order-summary, .stock-quote, .stepper input { font-variant-numeric: tabular-nums; }
 
 .wrap { width: min(100% - 48px, 1200px); margin-inline: auto; }
 .topbar { background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -93,6 +101,27 @@ button:disabled { cursor: default; }
 canvas { display: block; width: 100%; height: 340px; margin-top: 6px; touch-action: pan-y; cursor: crosshair; }
 
 .lower { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.book { grid-row: span 2; }
+.book-table { width: 100%; margin-top: 12px; border-collapse: collapse; table-layout: fixed; font-size: .875rem; }
+.book-table th { padding: 6px 8px; color: var(--muted); font-size: .75rem; font-weight: 500; }
+.book-table thead th:first-child, .book-table tfoot td:first-child { text-align: right; }
+.book-table thead th:last-child, .book-table tfoot td:last-child { text-align: left; }
+.book-table thead th:nth-child(2) { width: 38%; }
+.book-table tbody tr { border-top: 2px solid var(--panel); }
+.book-table td { height: 38px; padding: 0 8px; }
+.book-table .qty { --fill: 0%; }
+.ask .qty { text-align: right; background: linear-gradient(to left, var(--down-bar) var(--fill), transparent 0); }
+.bid .qty { text-align: left; background: linear-gradient(to right, var(--up-bar) var(--fill), transparent 0); }
+.book-table td.price { padding: 0; }
+.ask td.price { background: var(--down-tint); }
+.bid td.price { background: var(--up-tint); }
+.level { display: flex; align-items: baseline; justify-content: center; gap: 6px; width: 100%; height: 38px; padding: 0 6px; border: 0; background: none; font-weight: 650; }
+.level small { font-size: .75rem; font-weight: 500; }
+.level:hover { text-decoration: underline; text-underline-offset: 3px; }
+.level:focus-visible { outline-offset: -2px; }
+.current td.price { box-shadow: inset 0 0 0 1.5px var(--ink); }
+.book-table tfoot td, .book-table tfoot th { padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: .8125rem; }
+.book-table tfoot td { padding-inline: 8px; }
 
 .asset-list { margin-top: 12px; }
 .asset-list > div { display: flex; justify-content: space-between; gap: 12px; padding-block: 8px; font-size: .9375rem; }
@@ -104,13 +133,16 @@ canvas { display: block; width: 100%; height: 340px; margin-top: 6px; touch-acti
 .order { padding: 16px 20px 20px; }
 #order-form { --side: var(--buy); }
 #order-form[data-side="sell"] { --side: var(--sell); }
-.sides { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface); }
-.sides label { position: relative; cursor: pointer; }
-.sides input { position: absolute; opacity: 0; pointer-events: none; }
-.sides span { display: block; border-radius: 8px; text-align: center; color: var(--muted); font-weight: 700; }
+.sides, .types { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface); }
+.sides label, .types label { position: relative; cursor: pointer; }
+.sides input, .types input { position: absolute; opacity: 0; pointer-events: none; }
+.sides span, .types span { display: block; border-radius: 8px; text-align: center; color: var(--muted); font-weight: 700; }
 .sides span { padding: 9px; }
 .sides input:checked + span { background: var(--side); color: #fff; }
-.sides input:focus-visible + span { outline: 2px solid var(--down); outline-offset: 1px; }
+.types { margin-top: 14px; }
+.types span { padding: 5px; font-size: .875rem; font-weight: 650; }
+.types input:checked + span { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px #0000001f; }
+.sides input:focus-visible + span, .types input:focus-visible + span { outline: 2px solid var(--down); outline-offset: 1px; }
 .order-stock { display: flex; justify-content: space-between; gap: 8px; margin-top: 16px; }
 .order-stock span { color: var(--muted); font-size: .875rem; }
 .field-label { display: block; margin: 14px 0 6px; color: var(--muted); font-size: .8125rem; font-weight: 600; }
@@ -124,6 +156,7 @@ canvas { display: block; width: 100%; height: 340px; margin-top: 6px; touch-acti
 .stepper input::-webkit-inner-spin-button, .stepper input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .stepper input:disabled { color: var(--muted); }
 .unit { padding-inline: 4px 2px; color: var(--muted); font-size: .875rem; }
+.field-note { margin-top: 4px; color: var(--muted); font-size: .75rem; }
 .ratios { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
 .ratios button { padding: 5px 0; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--muted); font-size: .8125rem; font-weight: 600; }
 .ratios button:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
@@ -155,6 +188,7 @@ canvas { display: block; width: 100%; height: 340px; margin-top: 6px; touch-acti
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr) 310px; }
   .lower { grid-template-columns: minmax(0, 1fr); }
+  .book { grid-row: auto; }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 10px; }
   .stats > div:nth-child(3n + 1) { padding-inline-start: 0; border-inline-start: 0; }
 }

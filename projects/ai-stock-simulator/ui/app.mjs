@@ -17,6 +17,8 @@ const sample = {
         [50_100, 50_500, 49_800, 50_000, 1_112_000],
         [50_100, 51_200, 49_900, 51_000, 2_348_000],
       ],
+      // 현재가에서 가까운 호가부터의 잔량(주)
+      book: { asks: [1_820, 2_640, 3_175, 2_210, 4_030], bids: [2_465, 3_310, 1_980, 2_870, 3_560] },
     },
     {
       name: "한빛물류",
@@ -32,6 +34,7 @@ const sample = {
         [20_250, 20_300, 19_950, 20_000, 726_000],
         [20_050, 20_150, 19_900, 20_000, 389_000],
       ],
+      book: { asks: [640, 925, 1_310, 780, 1_105], bids: [870, 1_215, 560, 1_490, 935] },
     },
   ],
 };
@@ -51,6 +54,12 @@ const direction = (value) => value > 0 ? "up" : value < 0 ? "down" : "";
 const arrow = (value) => value > 0 ? "▲" : value < 0 ? "▼" : "";
 const movement = (value, base) => `${arrow(value - base)}${number.format(Math.abs(value - base))} (${percent.format(value / base - 1)})`;
 
+// 한국거래소 호가 단위
+const tick = (value) => value < 2_000 ? 1 : value < 5_000 ? 5 : value < 20_000 ? 10 : value < 50_000 ? 50
+  : value < 200_000 ? 100 : value < 500_000 ? 500 : 1_000;
+const tickUp = (value) => Math.floor(value / tick(value)) * tick(value) + tick(value);
+const tickDown = (value) => Math.max(1, Math.ceil(value / tick(value - 1)) * tick(value - 1) - tick(value - 1));
+
 function el(tag, className, ...children) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -60,6 +69,7 @@ function el(tag, className, ...children) {
 
 const form = byId("order-form");
 const quantity = byId("quantity");
+const priceInput = byId("order-price");
 const canvas = byId("price-chart");
 const rangeButtons = [...document.querySelectorAll(".ranges button")];
 let selected = sample.stocks[0];
@@ -117,24 +127,75 @@ function renderSelection() {
 
   byId("order-stock").textContent = selected.name;
   byId("order-current").textContent = `현재가 ${won(current.close)}`;
+  priceInput.value = current.close;
+  renderBook();
   renderOrder();
   renderChart();
 }
 
+function renderBook() {
+  const current = price(selected);
+  const previous = previousClose(selected);
+  const asks = [];
+  let level = current;
+  for (const size of selected.book.asks) {
+    level = tickUp(level);
+    asks.push([level, size]);
+  }
+  const bids = [];
+  level = current;
+  selected.book.bids.forEach((size, index) => {
+    if (index) level = tickDown(level);
+    bids.push([level, size]);
+  });
+  const largest = Math.max(...selected.book.asks, ...selected.book.bids);
+  const row = ([value, size], side) => {
+    const amount = el("td", "qty", number.format(size));
+    amount.style.setProperty("--fill", `${Math.round(size / largest * 100)}%`);
+    const button = el("button", `level ${direction(value - previous)}`,
+      number.format(value), el("small", "", percent.format(value / previous - 1)));
+    button.type = "button";
+    button.dataset.price = value;
+    const cells = [amount, el("td", "price", button), el("td", "qty")];
+    const tr = el("tr", side, ...(side === "ask" ? cells : cells.reverse()));
+    if (value === current) tr.classList.add("current");
+    return tr;
+  };
+  byId("book").replaceChildren(...asks.reverse().map((entry) => row(entry, "ask")), ...bids.map((entry) => row(entry, "bid")));
+  byId("ask-total").textContent = number.format(selected.book.asks.reduce((sum, size) => sum + size, 0));
+  byId("bid-total").textContent = number.format(selected.book.bids.reduce((sum, size) => sum + size, 0));
+}
+
+byId("book").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-price]");
+  if (!button) return;
+  form.elements.type.value = "limit";
+  priceInput.value = button.dataset.price;
+  renderOrder();
+});
+
 function orderState() {
   const selling = form.elements.side.value === "sell";
-  const unitPrice = price(selected);
+  const market = form.elements.type.value === "market";
+  if (market) priceInput.value = price(selected);
+  const orderPrice = priceInput.valueAsNumber;
+  const priceOk = Number.isInteger(orderPrice) && orderPrice > 0 && orderPrice % tick(orderPrice) === 0;
+  const unitPrice = priceOk ? orderPrice : price(selected);
   const limit = selling ? selected.holding : Math.floor(sample.cash / unitPrice);
-  return { selling, unitPrice, limit };
+  return { selling, market, priceOk, unitPrice, limit };
 }
 
 function renderOrder() {
-  const { selling, unitPrice, limit } = orderState();
+  const { selling, market, priceOk, unitPrice, limit } = orderState();
   form.dataset.side = selling ? "sell" : "buy";
+  priceInput.disabled = market;
+  form.querySelectorAll('[data-step="price"]').forEach((button) => { button.disabled = market; });
+  byId("tick-note").textContent = market ? "현재가 기준으로 계산합니다." : `호가 단위 ${won(tick(unitPrice))}`;
+  priceInput.setCustomValidity(priceOk ? "" : "호가 단위에 맞지 않는 가격");
   quantity.max = limit;
   quantity.disabled = limit === 0;
   form.querySelectorAll('[data-step="quantity"], [data-ratio]').forEach((button) => { button.disabled = limit === 0; });
-  const valid = limit > 0 && quantity.validity.valid;
+  const valid = priceOk && limit > 0 && quantity.validity.valid;
   byId("available-label").textContent = selling ? "매도 가능" : "매수 가능";
   byId("available").textContent = selling
     ? `${number.format(limit)}주`
@@ -143,7 +204,8 @@ function renderOrder() {
   const button = byId("preview-order");
   button.disabled = !valid;
   button.textContent = selling ? "매도 확인" : "매수 확인";
-  byId("order-status").textContent = limit === 0 ? (selling ? "보유한 주식이 없습니다." : "주문 가능 현금이 부족합니다.")
+  byId("order-status").textContent = !priceOk ? `가격을 ${won(tick(unitPrice))} 단위로 입력하세요.`
+    : limit === 0 ? (selling ? "보유한 주식이 없습니다." : "주문 가능 현금이 부족합니다.")
     : !quantity.validity.valid ? `1~${number.format(limit)}주를 입력하세요.` : "";
 }
 
@@ -154,17 +216,20 @@ form.addEventListener("click", (event) => {
   const { limit } = orderState();
   if (button.dataset.ratio) {
     quantity.value = Math.max(1, Math.floor(limit * Number(button.dataset.ratio)));
-  } else {
+  } else if (button.dataset.step === "quantity") {
     const next = (Number.isInteger(quantity.valueAsNumber) ? quantity.valueAsNumber : 0) + Number(button.dataset.dir);
     quantity.value = Math.min(Math.max(next, 1), Math.max(limit, 1));
+  } else {
+    const current = priceInput.valueAsNumber > 0 ? priceInput.valueAsNumber : price(selected);
+    priceInput.value = button.dataset.dir === "1" ? tickUp(current) : tickDown(current);
   }
   renderOrder();
 });
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   if (byId("preview-order").disabled || !form.checkValidity()) return;
-  const { selling, unitPrice } = orderState();
-  const how = `현재가 ${won(unitPrice)}`;
+  const { selling, market, unitPrice } = orderState();
+  const how = market ? "시장가" : `지정가 ${won(unitPrice)}`;
   byId("order-status").textContent = `${selected.name} ${number.format(quantity.valueAsNumber)}주 ${how} ${selling ? "매도" : "매수"} 미리보기`;
 });
 

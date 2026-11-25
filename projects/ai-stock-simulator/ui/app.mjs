@@ -58,6 +58,8 @@ function el(tag, className, ...children) {
   return node;
 }
 
+const form = byId("order-form");
+const quantity = byId("quantity");
 let selected = sample.stocks[0];
 
 const equity = sample.cash + sample.stocks.reduce((sum, stock) => sum + stock.holding * price(stock), 0);
@@ -78,6 +80,7 @@ const stockButtons = sample.stocks.map((stock) => {
   button.addEventListener("click", () => {
     if (stock === selected) return;
     selected = stock;
+    form.reset();
     renderSelection();
   });
   byId("stocks").append(button);
@@ -106,6 +109,57 @@ function renderSelection() {
   byId("profit").className = held ? direction(profit) : "";
   byId("holding").textContent = `${number.format(selected.holding)}주`;
   byId("average-price").textContent = held ? won(selected.averagePrice) : "—";
+
+  byId("order-stock").textContent = selected.name;
+  byId("order-current").textContent = `현재가 ${won(current.close)}`;
+  renderOrder();
 }
+
+function orderState() {
+  const selling = form.elements.side.value === "sell";
+  const unitPrice = price(selected);
+  const limit = selling ? selected.holding : Math.floor(sample.cash / unitPrice);
+  return { selling, unitPrice, limit };
+}
+
+function renderOrder() {
+  const { selling, unitPrice, limit } = orderState();
+  form.dataset.side = selling ? "sell" : "buy";
+  quantity.max = limit;
+  quantity.disabled = limit === 0;
+  form.querySelectorAll('[data-step="quantity"], [data-ratio]').forEach((button) => { button.disabled = limit === 0; });
+  const valid = limit > 0 && quantity.validity.valid;
+  byId("available-label").textContent = selling ? "매도 가능" : "매수 가능";
+  byId("available").textContent = selling
+    ? `${number.format(limit)}주`
+    : `${number.format(limit)}주 · 현금 ${won(sample.cash)}`;
+  byId("estimate").textContent = valid ? won(quantity.valueAsNumber * unitPrice) : "—";
+  const button = byId("preview-order");
+  button.disabled = !valid;
+  button.textContent = selling ? "매도 확인" : "매수 확인";
+  byId("order-status").textContent = limit === 0 ? (selling ? "보유한 주식이 없습니다." : "주문 가능 현금이 부족합니다.")
+    : !quantity.validity.valid ? `1~${number.format(limit)}주를 입력하세요.` : "";
+}
+
+form.addEventListener("input", renderOrder);
+form.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-step], button[data-ratio]");
+  if (!button || button.disabled) return;
+  const { limit } = orderState();
+  if (button.dataset.ratio) {
+    quantity.value = Math.max(1, Math.floor(limit * Number(button.dataset.ratio)));
+  } else {
+    const next = (Number.isInteger(quantity.valueAsNumber) ? quantity.valueAsNumber : 0) + Number(button.dataset.dir);
+    quantity.value = Math.min(Math.max(next, 1), Math.max(limit, 1));
+  }
+  renderOrder();
+});
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (byId("preview-order").disabled || !form.checkValidity()) return;
+  const { selling, unitPrice } = orderState();
+  const how = `현재가 ${won(unitPrice)}`;
+  byId("order-status").textContent = `${selected.name} ${number.format(quantity.valueAsNumber)}주 ${how} ${selling ? "매도" : "매수"} 미리보기`;
+});
 
 renderSelection();

@@ -56,6 +56,35 @@
       </div>
     </div>
     <div class="side">
+      <section class="panel order" aria-labelledby="order-title">
+        <h2 id="order-title" class="visually-hidden">주문 미리보기</h2>
+        <form id="order-form" data-side="buy" novalidate>
+          <fieldset class="sides" aria-label="매수 또는 매도">
+            <label><input type="radio" name="side" value="buy" checked><span>매수</span></label>
+            <label><input type="radio" name="side" value="sell"><span>매도</span></label>
+          </fieldset>
+          <p class="order-stock"><strong id="order-stock"></strong><span id="order-current"></span></p>
+          <label class="field-label" for="quantity">수량</label>
+          <div class="stepper">
+            <button type="button" data-step="quantity" data-dir="-1" aria-label="1주 줄이기">−</button>
+            <input id="quantity" name="quantity" type="number" inputmode="numeric" min="1" step="1" value="1" required aria-describedby="available">
+            <span class="unit">주</span>
+            <button type="button" data-step="quantity" data-dir="1" aria-label="1주 늘리기">+</button>
+          </div>
+          <div class="ratios" role="group" aria-label="가능 수량 대비 비율">
+            <button type="button" data-ratio="0.1">10%</button>
+            <button type="button" data-ratio="0.25">25%</button>
+            <button type="button" data-ratio="0.5">50%</button>
+            <button type="button" data-ratio="1">최대</button>
+          </div>
+          <dl class="order-summary">
+            <div><dt id="available-label"></dt><dd id="available"></dd></div>
+            <div class="total"><dt>총 주문 금액</dt><dd><output id="estimate" for="quantity"></output></dd></div>
+          </dl>
+          <button id="preview-order" class="order-button" type="submit"></button>
+          <p id="order-status" class="order-status" role="status"></p>
+        </form>
+      </section>
       <section class="panel watchlist" aria-labelledby="market-title">
         <div class="panel-head">
           <h2 id="market-title">관심 종목</h2>

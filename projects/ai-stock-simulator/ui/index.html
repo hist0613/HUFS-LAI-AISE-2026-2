@@ -48,6 +48,21 @@
         <canvas id="price-chart" role="img"></canvas>
       </section>
       <div class="lower">
+        <section class="panel book" aria-labelledby="book-title">
+          <div class="panel-head">
+            <h2 id="book-title">호가</h2>
+            <span class="note">가격을 누르면 지정가로 입력</span>
+          </div>
+          <table class="book-table">
+            <thead>
+              <tr><th scope="col">매도 잔량</th><th scope="col">가격</th><th scope="col">매수 잔량</th></tr>
+            </thead>
+            <tbody id="book"></tbody>
+            <tfoot>
+              <tr><td id="ask-total"></td><th scope="row">잔량 합계</th><td id="bid-total"></td></tr>
+            </tfoot>
+          </table>
+        </section>
         <section class="panel assets" aria-labelledby="assets-title">
           <h2 id="assets-title">내 주식</h2>
           <dl class="asset-list">
@@ -76,6 +91,18 @@
             <label><input type="radio" name="side" value="sell"><span>매도</span></label>
           </fieldset>
           <p class="order-stock"><strong id="order-stock"></strong><span id="order-current"></span></p>
+          <fieldset class="types" aria-label="주문 유형">
+            <label><input type="radio" name="type" value="limit" checked><span>지정가</span></label>
+            <label><input type="radio" name="type" value="market"><span>시장가</span></label>
+          </fieldset>
+          <label class="field-label" for="order-price">가격</label>
+          <div class="stepper">
+            <button type="button" data-step="price" data-dir="-1" aria-label="한 호가 내리기">−</button>
+            <input id="order-price" name="price" type="number" inputmode="numeric" min="1" required aria-describedby="tick-note">
+            <span class="unit">원</span>
+            <button type="button" data-step="price" data-dir="1" aria-label="한 호가 올리기">+</button>
+          </div>
+          <p id="tick-note" class="field-note"></p>
           <label class="field-label" for="quantity">수량</label>
           <div class="stepper">
             <button type="button" data-step="quantity" data-dir="-1" aria-label="1주 줄이기">−</button>
@@ -91,7 +118,7 @@
           </div>
           <dl class="order-summary">
             <div><dt id="available-label"></dt><dd id="available"></dd></div>
-            <div class="total"><dt>총 주문 금액</dt><dd><output id="estimate" for="quantity"></output></dd></div>
+            <div class="total"><dt>총 주문 금액</dt><dd><output id="estimate" for="order-price quantity"></output></dd></div>
           </dl>
           <button id="preview-order" class="order-button" type="submit"></button>
           <p id="order-status" class="order-status" role="status"></p>

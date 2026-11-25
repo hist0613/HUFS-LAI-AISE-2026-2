@@ -1,4 +1,4 @@
-"""X2 motor allocation and attitude stabilization; guidance follows later."""
+"""X2 motor allocation, attitude stabilization and altitude hold."""
 
 import mujoco
 import numpy as np
@@ -117,3 +117,43 @@ class AttitudeController:
             torque = self._inertia @ (self._kp * error - self._kd * omega)
             torque += np.cross(omega, self._inertia @ omega)
         return self.mixer.mix(thrust_n, torque)
+
+
+class AltitudeController:
+    """Hold a world-frame height using vertical PD feedback and gravity feedforward.
+
+    Call once per physics step with pos/vel in world-frame m and m/s.
+    Default attitude is level, yaw zero; target_quat uses body->world wxyz.
+    Intended for near-level flight, not inverted recovery or horizontal hold.
+    No integral state: a fresh episode needs no controller reset.
+    """
+
+    def __init__(self, model):
+        self.attitude = AttitudeController(model)
+        self._mass = float(model.body_subtreemass[model.body("x2").id])
+        gravity = model.opt.gravity
+        if (not np.isfinite(gravity).all() or not np.allclose(gravity[:2], 0)
+                or gravity[2] >= 0):
+            raise ValueError("Expected gravity along world -Z")
+        self._gravity = float(-gravity[2])
+        self._kp, self._kd = 9.0, 6.0  # 3 rad/s, critical damping.
+
+    def act(self, target_height_m, drone_state, target_quat=(1, 0, 0, 0)):
+        """Return four 0..13 N motor thrusts for a feasible target height."""
+        pos = np.asarray(drone_state["pos"], dtype=float)
+        vel = np.asarray(drone_state["vel"], dtype=float)
+        if (np.ndim(target_height_m) != 0 or not np.isfinite(target_height_m)
+                or pos.shape != (3,) or vel.shape != (3,)
+                or not np.isfinite(pos).all() or not np.isfinite(vel).all()):
+            raise ValueError("Expected finite scalar height and three-vector pos/vel")
+        quat = self.attitude._quaternion(drone_state["quat"])
+        with np.errstate(over="ignore", invalid="ignore"):
+            accel = self._kp * (float(target_height_m) - pos[2]) - self._kd * vel[2]
+        if not np.isfinite(accel):
+            raise ValueError("Altitude request is too large to represent")
+        # Bound ascent/descent acceleration while retaining positive lift.
+        accel = np.clip(accel, -0.5 * self._gravity, 0.5 * self._gravity)
+        vertical_axis = 1 - 2 * (quat[1]**2 + quat[2]**2)
+        # Limit compensation beyond 60 degrees to avoid division by zero.
+        thrust = self._mass * (self._gravity + accel) / max(vertical_axis, 0.5)
+        return self.attitude.act(thrust, target_quat, drone_state)

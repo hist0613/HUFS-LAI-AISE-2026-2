@@ -9,7 +9,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from drone_rl.pilot import AttitudeController, MotorMixer
+from drone_rl.pilot import AltitudeController, AttitudeController, MotorMixer
 
 
 def reset_drone(model, data):
@@ -284,3 +284,127 @@ def test_attitude_rejects_bad_state(pilot_model, field, value):
 def test_attitude_rejects_bad_gains(pilot_model, frequency, damping):
     with pytest.raises(ValueError):
         AttitudeController(pilot_model, frequency, damping)
+
+
+def flight_state(data):
+    return {**attitude_state(data), "pos": data.qpos[:3].copy(),
+            "vel": data.qvel[:3].copy()}
+
+
+@pytest.mark.parametrize("initial_height", [1.0, 1.5, 2.0])
+def test_altitude_holds_for_ten_seconds(pilot_model, pilot_data, initial_height):
+    m, d = pilot_model, pilot_data
+    controller = AltitudeController(m)
+    d.qpos[2] = initial_height
+    for _ in range(round(10 / m.opt.timestep)):
+        d.ctrl[:] = controller.act(1.5, flight_state(d))
+        assert np.isfinite(d.ctrl).all() and np.all((0 <= d.ctrl) & (d.ctrl <= 13))
+        mujoco.mj_step(m, d)
+        assert d.ncon == 0
+        assert np.linalg.norm(d.qpos[:2]) < 0.3
+        if d.time >= 2:
+            assert abs(d.qpos[2] - 1.5) < 0.15
+    assert abs(d.qvel[2]) < 0.05
+
+
+@pytest.mark.parametrize("vertical_speed", [-1.0, 1.0])
+def test_altitude_recovers_from_vertical_impulse(pilot_model, pilot_data, vertical_speed):
+    m, d = pilot_model, pilot_data
+    controller = AltitudeController(m)
+    for step in range(round(6 / m.opt.timestep)):
+        if step == round(3 / m.opt.timestep):
+            d.qvel[2] = vertical_speed
+        d.ctrl[:] = controller.act(1.5, flight_state(d))
+        mujoco.mj_step(m, d)
+        assert d.ncon == 0 and abs(d.qpos[2] - 1.5) < 0.3
+        if d.time >= 5:
+            assert abs(d.qpos[2] - 1.5) < 0.05
+    assert abs(d.qvel[2]) < 0.05
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("degrees", [-10, 10])
+def test_altitude_during_attitude_recovery(pilot_model, pilot_data, axis, degrees):
+    m, d = pilot_model, pilot_data
+    controller = AltitudeController(m)
+    d.qpos[3:7] = axis_quaternion(axis, degrees)
+    for _ in range(round(3 / m.opt.timestep)):
+        d.ctrl[:] = controller.act(1.5, flight_state(d))
+        mujoco.mj_step(m, d)
+        assert d.ncon == 0 and abs(d.qpos[2] - 1.5) < 0.15
+    assert abs(d.qvel[2]) < 0.05
+    assert 2 * np.arccos(np.clip(abs(d.qpos[3]), 0, 1)) < np.deg2rad(3)
+    # Lateral drift after an initial tilt is not controlled in this stage.
+
+
+@pytest.mark.parametrize("target_height", [1.0, 2.0])
+def test_altitude_tracks_changed_setpoint(pilot_model, pilot_data, target_height):
+    m, d = pilot_model, pilot_data
+    controller = AltitudeController(m)
+    target_quat = axis_quaternion(2, 90)
+    d.qpos[3:7] = target_quat
+    for step in range(round(6 / m.opt.timestep)):
+        height = 1.5 if step < round(3 / m.opt.timestep) else target_height
+        d.ctrl[:] = controller.act(height, flight_state(d), target_quat)
+        mujoco.mj_step(m, d)
+        assert d.ncon == 0
+        if d.time >= 5:
+            assert abs(d.qpos[2] - target_height) < 0.15
+    assert abs(d.qvel[2]) < 0.05
+    np.testing.assert_allclose(d.qpos[3:7], target_quat, atol=1e-5)
+
+
+def test_altitude_uses_model_mass_and_gravity(pilot_model):
+    import copy
+
+    model = copy.copy(pilot_model)
+    body = model.body("x2").id
+    model.body_mass[body] *= 1.2
+    model.opt.gravity[2] = -8
+    data = mujoco.MjData(model)
+    mujoco.mj_setConst(model, data)
+    reset_drone(model, data)
+    controller = AltitudeController(model)
+    state = flight_state(data)
+    before = {key: value.copy() for key, value in state.items()}
+    data.ctrl[:] = controller.act(1.5, state)
+    mujoco.mj_forward(model, data)
+    np.testing.assert_allclose(data.qacc, 0, atol=1e-8)
+    for key in state:
+        np.testing.assert_array_equal(state[key], before[key])
+
+
+@pytest.mark.parametrize("height,speed,angle", [(100, 0, 0), (-100, 0, 0),
+                                                (1.5, -100, 90), (1.5, 100, 180)])
+def test_altitude_limits_extreme_requests(pilot_model, pilot_data, height, speed, angle):
+    state = flight_state(pilot_data)
+    state["vel"][2] = speed
+    state["quat"] = axis_quaternion(0, angle)
+    ctrl = AltitudeController(pilot_model).act(height, state)
+    assert np.isfinite(ctrl).all() and np.all((0 <= ctrl) & (ctrl <= 13))
+    assert ctrl.sum() > 0  # Bounded output only; inverted recovery is not promised.
+
+
+@pytest.mark.parametrize("field,value", [
+    ("height", np.nan), ("height", np.inf), ("height", [1.5]),
+    ("height", np.finfo(float).max), ("pos", [0, 0]), ("pos", [0, 0, np.nan]),
+    ("vel", [0, 0]), ("vel", [0, 0, np.inf]),
+])
+def test_altitude_rejects_bad_state(pilot_model, pilot_data, field, value):
+    state, height = flight_state(pilot_data), 1.5
+    if field == "height":
+        height = value
+    else:
+        state[field] = value
+    with pytest.raises(ValueError):
+        AltitudeController(pilot_model).act(height, state)
+
+
+@pytest.mark.parametrize("gravity", [[0, 0, 0], [1, 0, -9.81], [0, 0, np.nan]])
+def test_altitude_rejects_unsupported_gravity(pilot_model, gravity):
+    import copy
+
+    model = copy.copy(pilot_model)
+    model.opt.gravity[:] = gravity
+    with pytest.raises(ValueError):
+        AltitudeController(model)

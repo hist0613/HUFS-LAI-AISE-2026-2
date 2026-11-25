@@ -35,6 +35,18 @@
           <div><dt>거래량(주)</dt><dd id="stat-volume"></dd></div>
         </dl>
       </section>
+      <section class="panel chart-panel" aria-labelledby="chart-title">
+        <div class="panel-head">
+          <h2 id="chart-title">차트</h2>
+          <div class="ranges" role="group" aria-label="차트 기간">
+            <button type="button" data-size="3">3턴</button>
+            <button type="button" data-size="5">5턴</button>
+            <button type="button" data-size="0">전체</button>
+          </div>
+        </div>
+        <p id="chart-legend" class="legend"></p>
+        <canvas id="price-chart" role="img"></canvas>
+      </section>
       <div class="lower">
         <section class="panel assets" aria-labelledby="assets-title">
           <h2 id="assets-title">내 주식</h2>

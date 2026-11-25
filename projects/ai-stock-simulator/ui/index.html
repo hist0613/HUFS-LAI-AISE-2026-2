@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>가상 주식 거래 | AI Stock Simulator</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-content">
+      <strong class="brand"><span class="brand-mark" aria-hidden="true"></span>AI Stock Simulator</strong>
+      <div class="topbar-meta">
+        <span id="turn"></span>
+        <span class="sample-label">예제 데이터</span>
+      </div>
+    </div>
+  </header>
+  <main class="wrap layout">
+    <div class="detail">
+      <section class="panel quote" aria-labelledby="quote-name">
+        <h1 id="quote-name"></h1>
+        <p class="quote-price">
+          <strong id="price"></strong>
+          <span id="change"></span>
+          <span class="change-label">이전 턴 대비</span>
+        </p>
+        <dl class="stats" aria-label="이번 턴 시세">
+          <div><dt>시가</dt><dd id="stat-open"></dd></div>
+          <div><dt>고가</dt><dd id="stat-high"></dd></div>
+          <div><dt>저가</dt><dd id="stat-low"></dd></div>
+          <div><dt>이전 종가</dt><dd id="stat-prev"></dd></div>
+          <div><dt>거래량(주)</dt><dd id="stat-volume"></dd></div>
+        </dl>
+      </section>
+      <div class="lower">
+        <section class="panel assets" aria-labelledby="assets-title">
+          <h2 id="assets-title">내 주식</h2>
+          <dl class="asset-list">
+            <div class="lead"><dt>평가 금액</dt><dd id="market-value"></dd></div>
+            <div><dt>평가 손익</dt><dd id="profit"></dd></div>
+            <div><dt>보유 수량</dt><dd id="holding"></dd></div>
+            <div><dt>평균 단가</dt><dd id="average-price"></dd></div>
+          </dl>
+        </section>
+        <section class="panel account" aria-labelledby="account-title">
+          <h2 id="account-title">내 계좌</h2>
+          <dl class="asset-list">
+            <div class="lead"><dt>총자산</dt><dd id="equity"></dd></div>
+            <div><dt>주문 가능 현금</dt><dd id="cash"></dd></div>
+            <div><dt>총 손익</dt><dd id="return"></dd></div>
+          </dl>
+        </section>
+      </div>
+    </div>
+    <div class="side">
+      <section class="panel watchlist" aria-labelledby="market-title">
+        <div class="panel-head">
+          <h2 id="market-title">관심 종목</h2>
+          <span class="note">이전 턴 대비</span>
+        </div>
+        <div id="stocks" class="stock-list"></div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

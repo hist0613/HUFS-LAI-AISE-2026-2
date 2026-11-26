@@ -34,11 +34,11 @@ test("GET /api/health 는 ok를 돌려준다", () =>
 test("GET /api/game 은 화면에 필요한 상태를 모두 돌려준다", () =>
   withServer(async (base) => {
     const game = await getGame(base);
-    for (const key of ["turn", "initialCash", "cash", "equity", "profit", "stocks", "news"]) {
+    for (const key of ["turn", "initialCash", "cash", "availableCash", "equity", "profit", "stocks", "orders", "trades", "news"]) {
       assert.ok(key in game, key);
     }
     const stock = game.stocks[0];
-    for (const key of ["id", "name", "price", "previousClose", "holding", "averagePrice", "candles", "book"]) {
+    for (const key of ["id", "name", "price", "previousClose", "holding", "availableQuantity", "averagePrice", "candles", "book"]) {
       assert.ok(key in stock, key);
     }
     assert.equal(stock.price, 50_000);
@@ -74,6 +74,27 @@ test("POST /api/game/reset 은 같은 시드면 처음 상태로 돌아간다", 
     const reset = await send("POST", `${base}/api/game/reset`, { seed: 2026 });
     assert.equal(reset.status, 200);
     assert.deepEqual(reset.body.game, initial);
+  }));
+
+test("주문 체결·대기·취소", () =>
+  withServer(async (base) => {
+    const bought = await send("POST", `${base}/api/orders`, { stockId: "samsong", side: "buy", type: "market", quantity: 2 });
+    assert.equal(bought.status, 201);
+    assert.equal(bought.body.trade.price, 50_000);
+    assert.equal(bought.body.game.cash, 900_000);
+    assert.equal(bought.body.game.stocks[0].holding, 2);
+
+    const pending = await send("POST", `${base}/api/orders`, { stockId: "samsong", side: "buy", type: "limit", price: 40_000, quantity: 5 });
+    assert.equal(pending.body.order.status, "pending");
+    assert.equal(pending.body.game.availableCash, 700_000);
+
+    const cancelled = await send("DELETE", `${base}/api/orders/${pending.body.order.id}`);
+    assert.equal(cancelled.body.order.status, "cancelled");
+    assert.equal(cancelled.body.game.availableCash, 900_000);
+    assert.equal((await send("DELETE", `${base}/api/orders/999`)).status, 404);
+
+    const short = await send("POST", `${base}/api/orders`, { stockId: "samsong", side: "sell", type: "market", quantity: 3 });
+    assert.deepEqual(short, { status: 400, body: { error: "매도 가능 수량이 부족합니다." } });
   }));
 
 test("잘못된 요청은 400을 돌려주고 상태를 바꾸지 않는다", () =>

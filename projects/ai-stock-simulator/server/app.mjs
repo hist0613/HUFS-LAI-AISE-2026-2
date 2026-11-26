@@ -49,6 +49,18 @@ export function createApp({ market = new Market() } = {}) {
     res.status(201).json({ news, game: market.snapshot() });
   });
 
+  // 주문. 본문 예: { "stockId": "samsong", "side": "buy", "type": "limit", "price": 50800, "quantity": 3 }
+  app.post("/api/orders", (req, res) => {
+    const { order, trade } = market.placeOrder(req.body);
+    res.status(201).json({ order, trade, game: market.snapshot() });
+  });
+
+  // 대기 중인 지정가 주문 취소
+  app.delete("/api/orders/:id", (req, res) => {
+    const order = market.cancelOrder(Number(req.params.id));
+    res.json({ order, game: market.snapshot() });
+  });
+
   // 거래 화면(ui/ 폴더)이 있으면 같은 주소에서 보여준다. http://localhost:3000/
   app.use(express.static(uiDir));
 

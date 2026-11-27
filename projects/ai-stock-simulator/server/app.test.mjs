@@ -113,3 +113,21 @@ test("없는 주소는 404를 돌려준다", () =>
   withServer(async (base) => {
     assert.equal((await send("GET", `${base}/api/nothing`)).status, 404);
   }));
+
+test("턴 API에서 배당 지급·조회·재시작이 이어진다", () =>
+  withServer(async (base) => {
+    await send("POST", `${base}/api/orders`, {
+      stockId: "samsong", side: "buy", type: "market", quantity: 2,
+    });
+    const result = await send("POST", `${base}/api/turns`, { count: 20 });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.game.cash, 902_000);
+    assert.equal(result.body.game.totalDividends, 2_000);
+    assert.deepEqual(result.body.game.dividends.map((item) => item.turn), [28, 18]);
+    assert.deepEqual(await getGame(base), result.body.game);
+    const reset = await send("POST", `${base}/api/game/reset`, { seed: 2026 });
+    assert.equal(reset.body.game.cash, 1_000_000);
+    assert.equal(reset.body.game.totalDividends, 0);
+    assert.equal(reset.body.game.nextDividendTurn, 18);
+    assert.deepEqual(reset.body.game.dividends, []);
+  }));

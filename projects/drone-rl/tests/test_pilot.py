@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from drone_rl.pilot import AltitudeController, AttitudeController, MotorMixer
+from drone_rl.pilot import VelocityController
 
 
 def reset_drone(model, data):
@@ -408,3 +409,97 @@ def test_altitude_rejects_unsupported_gravity(pilot_model, gravity):
     model.opt.gravity[:] = gravity
     with pytest.raises(ValueError):
         AltitudeController(model)
+
+
+def velocity_step(model, data, controller, target, height=1.5, yaw=0.0):
+    data.ctrl[:] = controller.act(target, height, flight_state(data), yaw)
+    assert np.isfinite(data.ctrl).all() and np.all((0 <= data.ctrl) & (data.ctrl <= 13))
+    mujoco.mj_step(model, data)
+    assert data.ncon == 0
+    assert abs(data.qpos[2] - height) < 0.15
+    vertical_axis = 1 - 2 * np.sum(data.qpos[4:6]**2)
+    assert vertical_axis > np.cos(np.deg2rad(30))  # Actual transient tilt bound.
+
+
+@pytest.mark.parametrize("yaw", [0.0, np.pi / 2])
+@pytest.mark.parametrize("target", [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1]])
+def test_velocity_tracks_world_xy(pilot_model, pilot_data, yaw, target):
+    m, d = pilot_model, pilot_data
+    controller = VelocityController(m)
+    d.qpos[3:7] = axis_quaternion(2, np.rad2deg(yaw))
+    for _ in range(round(6 / m.opt.timestep)):
+        velocity_step(m, d, controller, target, yaw=yaw)
+        if d.time >= 3:
+            assert np.linalg.norm(d.qvel[:2] - target) < 0.15
+    assert np.dot(d.qpos[:2], target) > 3
+    forward = np.empty(9)
+    mujoco.mju_quat2Mat(forward, d.qpos[3:7])
+    heading = np.arctan2(forward[3], forward[0])
+    assert abs(np.arctan2(np.sin(heading - yaw), np.cos(heading - yaw))) < np.deg2rad(3)
+
+
+def test_velocity_changes_direction_and_rejects_disturbance(pilot_model, pilot_data):
+    m, d = pilot_model, pilot_data
+    controller = VelocityController(m)
+    for step in range(round(10 / m.opt.timestep)):
+        target = [1, 0] if step < round(4 / m.opt.timestep) else [-1, 0]
+        if step == round(7 / m.opt.timestep):
+            d.qvel[1] += 1.0
+        velocity_step(m, d, controller, target)
+        if d.time >= 9:
+            assert np.linalg.norm(d.qvel[:2] - target) < 0.15
+
+
+def test_velocity_zero_request_holds_hover(pilot_model, pilot_data):
+    m, d = pilot_model, pilot_data
+    controller = VelocityController(m)
+    for _ in range(round(10 / m.opt.timestep)):
+        velocity_step(m, d, controller, [0, 0])
+        assert np.linalg.norm(d.qvel[:2]) < 0.05
+        assert np.linalg.norm(d.qpos[:2]) < 0.3
+
+
+@pytest.mark.parametrize("target", [[100, 0], [100, 100]])
+def test_velocity_caps_speed_without_changing_direction(pilot_model, pilot_data, target):
+    m, d = pilot_model, pilot_data
+    controller = VelocityController(m)
+    expected = np.asarray(target) * (3 / np.linalg.norm(target))
+    for _ in range(round(8 / m.opt.timestep)):
+        velocity_step(m, d, controller, target)
+        if d.time >= 5:
+            assert np.linalg.norm(d.qvel[:2] - expected) < 0.15
+
+
+def test_velocity_preserves_inputs_and_has_no_episode_memory(pilot_model, pilot_data):
+    controller = VelocityController(pilot_model)
+    state, target = flight_state(pilot_data), np.array([100., 100.])
+    before = {key: value.copy() for key, value in state.items()}
+    expected = controller.act(target, 1.5, state)
+    controller.act([-2, 1], 2.0, state, 1.0)
+    np.testing.assert_allclose(controller.act(target, 1.5, state), expected)
+    np.testing.assert_array_equal(target, [100, 100])
+    for key in state:
+        np.testing.assert_array_equal(state[key], before[key])
+
+
+@pytest.mark.parametrize("field,value", [
+    ("target", [1]), ("target", [1, 0, 0]), ("target", [np.nan, 0]),
+    ("target", [np.inf, 0]), ("target", [np.finfo(float).max, 0]),
+    ("vel", [0, 0]), ("vel", [0, np.nan, 0]),
+    ("vel", [np.finfo(float).max, 0, 0]),
+    ("yaw", np.inf), ("yaw", [0]), ("height", np.nan),
+    ("quat", [0, 0, 0, 0]),
+])
+def test_velocity_rejects_bad_inputs(pilot_model, pilot_data, field, value):
+    target, height, yaw = [1, 0], 1.5, 0.0
+    state = flight_state(pilot_data)
+    if field == "target":
+        target = value
+    elif field == "height":
+        height = value
+    elif field == "yaw":
+        yaw = value
+    else:
+        state[field] = value
+    with pytest.raises(ValueError):
+        VelocityController(pilot_model).act(target, height, state, yaw)

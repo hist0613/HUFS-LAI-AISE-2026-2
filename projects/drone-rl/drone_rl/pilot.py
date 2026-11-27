@@ -1,4 +1,4 @@
-"""X2 motor allocation, attitude stabilization and altitude hold."""
+"""X2 motor allocation, attitude, altitude and horizontal velocity control."""
 
 import mujoco
 import numpy as np
@@ -157,3 +157,48 @@ class AltitudeController:
         # Limit compensation beyond 60 degrees to avoid division by zero.
         thrust = self._mass * (self._gravity + accel) / max(vertical_axis, 0.5)
         return self.attitude.act(thrust, target_quat, drone_state)
+
+
+class VelocityController:
+    """Track world-frame XY velocity (m/s), height (m), and yaw (radians).
+
+    Speed is capped at 3 m/s, desired tilt at 20 degrees and lateral acceleration
+    at 3 m/s^2. Intended for near-level flight; no obstacle or position control.
+    Call every physics step. No accumulated state needs resetting between runs.
+    """
+
+    def __init__(self, model):
+        self.altitude = AltitudeController(model)
+        self._gravity = float(-model.opt.gravity[2])
+        self._max_accel = min(3.0, self._gravity * np.tan(np.deg2rad(20)))
+
+    def act(self, target_velocity_xy, target_height_m, drone_state, target_yaw_rad=0.0):
+        """Return four motor thrusts; yaw does not rotate the world-frame command."""
+        target = np.asarray(target_velocity_xy, dtype=float)
+        velocity = np.asarray(drone_state["vel"], dtype=float)
+        if (target.shape != (2,) or velocity.shape != (3,)
+                or not np.isfinite(target).all() or not np.isfinite(velocity).all()
+                or np.ndim(target_yaw_rad) != 0 or not np.isfinite(target_yaw_rad)):
+            raise ValueError("Expected finite XY target, XYZ velocity and scalar yaw")
+        with np.errstate(over="ignore", invalid="ignore"):
+            speed = np.linalg.norm(target)
+        if not np.isfinite(speed):
+            raise ValueError("Velocity request is too large to represent")
+        target = target * (3.0 / speed) if speed > 3.0 else target
+        with np.errstate(over="ignore", invalid="ignore"):
+            accel = 1.5 * (target - velocity[:2])
+            magnitude = np.linalg.norm(accel)
+        if not np.isfinite(magnitude):
+            raise ValueError("Velocity error is too large to represent")
+        if magnitude > self._max_accel:
+            accel = accel * (self._max_accel / magnitude)
+        # Aim body +Z along the required acceleration including gravity.
+        up = np.r_[accel, self._gravity]
+        up /= np.linalg.norm(up)
+        heading = np.array([np.cos(target_yaw_rad), np.sin(target_yaw_rad), 0])
+        left = np.cross(up, heading)
+        left /= np.linalg.norm(left)  # Positive up[2] prevents a parallel heading.
+        forward = np.cross(left, up)
+        target_quat = np.empty(4)
+        mujoco.mju_mat2Quat(target_quat, np.column_stack((forward, left, up)).ravel())
+        return self.altitude.act(target_height_m, drone_state, target_quat)

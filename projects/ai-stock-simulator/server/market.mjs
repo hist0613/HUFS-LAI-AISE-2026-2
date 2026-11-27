@@ -11,6 +11,9 @@ const MAX_DRIFT = 0.08; // 뉴스 없는 한 턴의 최대 변동 ±8%
 const BOOK_DEPTH = 5; // 호가 단계 수
 const BASE_VOLUME = { samsong: 1_500_000, hanbit: 500_000 };
 const DEFAULT_BASE_VOLUME = 300_000;
+// 팀 리뷰용 배당 규칙. 시작 이후 10턴마다 삼송전자 주당 500원.
+const DIVIDEND_INTERVAL = 10;
+const DIVIDEND_PER_SHARE = { samsong: 500 };
 
 // 게임 규칙 위반(현금 부족 등). status는 HTTP 응답 코드로 쓴다.
 export class GameError extends Error {
@@ -46,6 +49,9 @@ export class Market {
     this.orders = []; // 체결을 기다리는 지정가 주문
     this.trades = []; // 체결 내역 (최신이 앞)
     this.news = []; // 반영된 뉴스 (최신이 앞)
+    this.dividends = [];
+    this.totalDividends = 0;
+    this.lastDividendTurn = HISTORY_TURNS;
     this.nextId = { order: 1, trade: 1, news: 1 };
   }
 
@@ -94,6 +100,10 @@ export class Market {
       orders: this.orders,
       trades: this.trades,
       news: this.news,
+      dividends: this.dividends,
+      totalDividends: this.totalDividends,
+      nextDividendTurn: HISTORY_TURNS
+        + (Math.floor((this.turn - HISTORY_TURNS) / DIVIDEND_INTERVAL) + 1) * DIVIDEND_INTERVAL,
     });
   }
 
@@ -101,6 +111,7 @@ export class Market {
 
   // 턴을 하나 넘긴다. 모든 종목에 새 캔들이 생기고 지정가 주문 체결을 확인한다.
   advanceTurn() {
+    this.#payDividends(this.turn + 1);
     this.turn += 1;
     for (const stock of this.stocks) {
       const previous = this.price(stock);
@@ -192,6 +203,28 @@ export class Market {
   }
 
   // ── 내부 계산 ──
+
+  // 지급 턴 시작 시 실제 보유량 기준. 해당 턴의 지정가 체결보다 먼저 확정한다.
+  #payDividends(turn) {
+    if (turn <= this.lastDividendTurn || (turn - HISTORY_TURNS) % DIVIDEND_INTERVAL !== 0) return;
+    const payments = [];
+    for (const stock of this.stocks) {
+      const perShare = DIVIDEND_PER_SHARE[stock.id] ?? 0;
+      if (perShare === 0 || stock.holding === 0) continue;
+      const amount = stock.holding * perShare;
+      if (!Number.isSafeInteger(amount)) throw new GameError("배당금이 안전한 정수 범위를 벗어났습니다.");
+      payments.push({ turn, stockId: stock.id, quantity: stock.holding, perShare, amount });
+    }
+    const total = payments.reduce((sum, payment) => sum + payment.amount, 0);
+    if (!Number.isSafeInteger(this.cash + total) || !Number.isSafeInteger(this.totalDividends + total)) {
+      throw new GameError("누적 배당금 또는 현금이 안전한 정수 범위를 벗어났습니다.");
+    }
+    this.cash += total;
+    this.totalDividends += total;
+    this.dividends.unshift(...payments);
+    this.dividends.length = Math.min(this.dividends.length, MAX_LOG);
+    this.lastDividendTurn = turn;
+  }
 
   #execute(stock, order, price) {
     const amount = price * order.quantity;

@@ -1,4 +1,4 @@
-"""X2 motor allocation, attitude, altitude, velocity and position control."""
+"""X2 flight control and basic maneuver guidance."""
 
 import mujoco
 import numpy as np
@@ -257,4 +257,60 @@ class PositionController:
         ctrl = self._control(target, drone_state, yaw)
         # Invalid input must not latch or replace an episode's brake target.
         self._brake_position, self._brake_yaw = target, yaw
+        return ctrl
+
+
+class Pilot:
+    """Execute hold_course, gap_left, gap_right and brake each physics step.
+
+    Latch initial height/yaw until reset. Gap entry shifts the lateral path 1 m;
+    repeating the same action keeps that path, rather than accumulating shifts.
+    obs is reserved for climb/target guidance. No obstacle reflex is provided.
+    """
+
+    def __init__(self, model):
+        self.position = PositionController(model)
+        self.reset()
+
+    def reset(self):
+        """Clear all maneuver/episode targets before starting a new episode."""
+        self.position.reset()
+        self._maneuver = self._lane = self._height = self._yaw = None
+
+    def act(self, mv, obs, drone_state):
+        """Return four motor thrusts using the team's maneuver/state interface."""
+        if mv in ("climb", "reacquire"):
+            raise NotImplementedError(f"Maneuver {mv!r} is not implemented yet")
+        if mv not in ("hold_course", "gap_left", "gap_right", "brake"):
+            raise ValueError(f"Unknown maneuver: {mv!r}")
+        if not isinstance(obs, dict):
+            raise ValueError("Expected an observation dict")
+        pos = PositionController._position(drone_state["pos"])
+        height, yaw = self._height, self._yaw
+        if height is None:
+            height = float(pos[2])
+            quat = AttitudeController._quaternion(drone_state["quat"])
+            rotation = np.empty(9)
+            mujoco.mju_quat2Mat(rotation, quat)
+            yaw = float(np.arctan2(rotation[3], rotation[0]))
+        lane = self._lane
+        if mv == "brake":
+            ctrl = self.position.brake(drone_state)
+        else:
+            forward = np.array([np.cos(yaw), np.sin(yaw)])
+            left = np.array([-forward[1], forward[0]])
+            if mv != self._maneuver:
+                offset = {"hold_course": 0, "gap_left": 1, "gap_right": -1}[mv]
+                lane = pos[:2].copy() + offset * left
+            with np.errstate(over="ignore", invalid="ignore"):
+                lateral_error = float((lane - pos[:2]) @ left)
+            if not np.isfinite(lateral_error):
+                raise ValueError("Lateral position error is too large to represent")
+            lateral_speed = np.clip(0.6 * lateral_error, -0.6, 0.6)
+            forward_speed = 1.0 if mv == "hold_course" else 0.6
+            velocity = forward_speed * forward + lateral_speed * left
+            ctrl = self.position.velocity.act(velocity, height, drone_state, yaw)
+            self.position.reset()  # Leaving brake allows a new anchor next time.
+        # Commit targets only after the complete request has been validated.
+        self._maneuver, self._lane, self._height, self._yaw = mv, lane, height, yaw
         return ctrl

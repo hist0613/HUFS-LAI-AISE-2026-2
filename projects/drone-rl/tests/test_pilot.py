@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from drone_rl.pilot import AltitudeController, AttitudeController, MotorMixer
-from drone_rl.pilot import PositionController, VelocityController
+from drone_rl.pilot import Pilot, PositionController, VelocityController
 
 
 def reset_drone(model, data):
@@ -636,3 +636,113 @@ def test_invalid_brake_call_does_not_latch(pilot_model, pilot_data, field, value
 def test_position_rejects_bad_target(pilot_model, pilot_data, target):
     with pytest.raises(ValueError):
         PositionController(pilot_model).act(target, flight_state(pilot_data))
+
+
+@pytest.fixture
+def maneuver_obs():
+    return {"sector_range_m": dict.fromkeys(
+        ["far_left", "left", "center", "right", "far_right"], 25.0),
+        "sectors_blocked": 0, "path_ahead_m": 25.0, "nearest_obstacle_m": 25.0,
+        "free_ahead_above_m": 25.0, "free_ahead_level_m": 25.0, "free_ahead_below_m": 25.0,
+        "target": {"visible": True, "bearing_deg": 0.0, "range_m": 5.0, "unseen_for_s": 0.0}}
+
+
+@pytest.mark.parametrize("yaw", [0, np.pi / 2])
+@pytest.mark.parametrize("mv,offset", [("hold_course", 0), ("gap_left", 1), ("gap_right", -1)])
+def test_maneuver_direction_and_repeated_command(pilot_model, pilot_data, maneuver_obs, yaw, mv, offset):
+    m, d = pilot_model, pilot_data
+    pilot = Pilot(m)
+    d.qpos[2] = 1.8
+    d.qpos[3:7] = axis_quaternion(2, np.rad2deg(yaw))
+    forward, left = np.array([np.cos(yaw), np.sin(yaw)]), np.array([-np.sin(yaw), np.cos(yaw)])
+    for _ in range(round(8 / m.opt.timestep)):
+        position_step(m, d, pilot.act(mv, maneuver_obs, flight_state(d)))
+        assert abs(d.qpos[2] - 1.8) < 0.15
+        assert abs(d.qpos[:2] @ left) < 1.3
+        if d.time >= 6:
+            assert abs(d.qpos[:2] @ left - offset) < 0.15
+            assert abs(d.qvel[:2] @ left) < 0.1
+            expected_speed = 1.0 if mv == "hold_course" else 0.6
+            assert abs(d.qvel[:2] @ forward - expected_speed) < 0.15
+    assert d.qpos[:2] @ forward > 3
+
+
+def test_hold_course_keeps_shifted_lane(pilot_model, pilot_data, maneuver_obs):
+    m, d = pilot_model, pilot_data
+    pilot = Pilot(m)
+    for _ in range(round(6 / m.opt.timestep)):
+        position_step(m, d, pilot.act("gap_left", maneuver_obs, flight_state(d)))
+    lane_y = float(d.qpos[1])
+    assert lane_y > 0.8
+    for _ in range(round(6 / m.opt.timestep)):
+        position_step(m, d, pilot.act("hold_course", maneuver_obs, flight_state(d)))
+        assert abs(d.qpos[1] - lane_y) < 0.15
+
+
+def test_maneuver_brake_move_brake_uses_new_anchor(pilot_model, pilot_data, maneuver_obs):
+    m, d = pilot_model, pilot_data
+    pilot = Pilot(m)
+    anchors = []
+    for _ in range(2):
+        for _ in range(round(3 / m.opt.timestep)):
+            position_step(m, d, pilot.act("hold_course", maneuver_obs, flight_state(d)))
+        anchors.append(d.qpos[:3].copy())
+        for step in range(round(8 / m.opt.timestep)):
+            position_step(m, d, pilot.act("brake", maneuver_obs, flight_state(d)))
+            if step * m.opt.timestep >= 6:
+                assert np.linalg.norm(d.qpos[:3] - anchors[-1]) < 0.15
+                assert np.linalg.norm(d.qvel[:3]) < 0.1
+    assert anchors[1][0] - anchors[0][0] > 2
+
+
+def test_pilot_reset_clears_height_heading_and_brake(pilot_model, pilot_data, maneuver_obs):
+    pilot = Pilot(pilot_model)
+    state = flight_state(pilot_data)
+    pilot.act("gap_left", maneuver_obs, state)
+    pilot.act("brake", maneuver_obs, state)
+    pilot.reset()
+    state["pos"] = np.array([2., -1., 2.])
+    state["quat"] = axis_quaternion(2, 90)
+    fresh = Pilot(pilot_model)
+    for mv in ("brake", "gap_right", "hold_course", "brake"):
+        np.testing.assert_allclose(pilot.act(mv, maneuver_obs, state),
+                                   fresh.act(mv, maneuver_obs, state), atol=1e-12)
+
+
+def test_pilot_preserves_observation_and_state(pilot_model, pilot_data, maneuver_obs):
+    import copy
+
+    pilot, state = Pilot(pilot_model), flight_state(pilot_data)
+    obs_before, state_before = copy.deepcopy(maneuver_obs), copy.deepcopy(state)
+    for mv in ("hold_course", "gap_left", "gap_right", "brake"):
+        pilot.act(mv, maneuver_obs, state)
+    assert maneuver_obs == obs_before
+    for key in state:
+        np.testing.assert_array_equal(state[key], state_before[key])
+
+
+@pytest.mark.parametrize("mv,error", [("climb", NotImplementedError), ("reacquire", NotImplementedError),
+                                     ("left", ValueError), (None, ValueError)])
+def test_pilot_rejects_unsupported_actions(pilot_model, pilot_data, maneuver_obs, mv, error):
+    with pytest.raises(error):
+        Pilot(pilot_model).act(mv, maneuver_obs, flight_state(pilot_data))
+
+
+@pytest.mark.parametrize("primed", [False, True])
+@pytest.mark.parametrize("field,value", [("obs", None), ("pos", [0, 0]),
+                                       ("quat", [0, 0, 0, 0]), ("angvel", [np.nan, 0, 0])])
+def test_pilot_invalid_call_preserves_targets(pilot_model, pilot_data, maneuver_obs, primed, field, value):
+    pilot, fresh = Pilot(pilot_model), Pilot(pilot_model)
+    state, bad = flight_state(pilot_data), flight_state(pilot_data)
+    if primed:
+        pilot.act("brake", maneuver_obs, state)
+        fresh.act("brake", maneuver_obs, state)
+    bad["pos"] = np.array([2., -1., 2.])
+    obs = value if field == "obs" else maneuver_obs
+    if field != "obs":
+        bad[field] = value
+    with pytest.raises(ValueError):
+        pilot.act("gap_left", obs, bad)
+    for mv in ("brake", "hold_course", "gap_right"):
+        np.testing.assert_allclose(pilot.act(mv, maneuver_obs, state),
+                                   fresh.act(mv, maneuver_obs, state))

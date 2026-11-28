@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from drone_rl.pilot import AltitudeController, AttitudeController, MotorMixer
-from drone_rl.pilot import VelocityController
+from drone_rl.pilot import PositionController, VelocityController
 
 
 def reset_drone(model, data):
@@ -503,3 +503,136 @@ def test_velocity_rejects_bad_inputs(pilot_model, pilot_data, field, value):
         state[field] = value
     with pytest.raises(ValueError):
         VelocityController(pilot_model).act(target, height, state, yaw)
+
+
+def position_step(model, data, ctrl):
+    assert np.isfinite(ctrl).all() and np.all((0 <= ctrl) & (ctrl <= 13))
+    data.ctrl[:] = ctrl
+    mujoco.mj_step(model, data)
+    assert data.ncon == 0
+    assert 1 - 2 * np.sum(data.qpos[4:6]**2) > np.cos(np.deg2rad(30))
+
+
+@pytest.mark.parametrize("target", [[1, 0, 1.5], [0, -1, 1.5], [-1, 1, 1.5], [.5, -.5, 2]])
+def test_position_reaches_and_holds_target(pilot_model, pilot_data, target):
+    m, d = pilot_model, pilot_data
+    controller = PositionController(m)
+    for _ in range(round(10 / m.opt.timestep)):
+        position_step(m, d, controller.act(target, flight_state(d)))
+        if d.time >= 6:
+            assert np.linalg.norm(d.qpos[:3] - target) < 0.15
+            assert np.linalg.norm(d.qvel[:3]) < 0.1
+
+
+@pytest.mark.parametrize("target,yaw", [([1, 0], 0), ([-1, 0], 0), ([0, 1], np.pi / 2),
+                                       ([0, -1], 0), ([1, 1], np.pi / 2), ([3, 0], 0)])
+def test_brake_after_flight_holds_entry_pose(pilot_model, pilot_data, target, yaw):
+    m, d = pilot_model, pilot_data
+    controller = PositionController(m)
+    d.qpos[3:7] = axis_quaternion(2, np.rad2deg(yaw))
+    for _ in range(round(3 / m.opt.timestep)):
+        velocity_step(m, d, controller.velocity, target, yaw=yaw)
+    anchor = d.qpos[:3].copy()
+    assert np.linalg.norm(d.qvel[:2]) > 0.8
+    for step in range(round(8 / m.opt.timestep)):
+        position_step(m, d, controller.brake(flight_state(d)))
+        assert abs(d.qpos[2] - anchor[2]) < 0.15
+        if step * m.opt.timestep >= 6:
+            assert np.linalg.norm(d.qpos[:3] - anchor) < 0.15
+            assert np.linalg.norm(d.qvel[:3]) < 0.1
+    rotation = np.empty(9)
+    mujoco.mju_quat2Mat(rotation, d.qpos[3:7])
+    error = np.arctan2(rotation[3], rotation[0]) - yaw
+    assert abs(np.arctan2(np.sin(error), np.cos(error))) < np.deg2rad(3)
+
+
+def test_brake_returns_after_position_and_velocity_disturbance(pilot_model, pilot_data):
+    m, d = pilot_model, pilot_data
+    controller = PositionController(m)
+    anchor = d.qpos[:3].copy()
+    controller.brake(flight_state(d))
+    d.qpos[:2] += [.5, -.5]
+    d.qvel[:2] = [.4, -.3]
+    for _ in range(round(10 / m.opt.timestep)):
+        position_step(m, d, controller.brake(flight_state(d)))
+        assert abs(d.qpos[2] - anchor[2]) < 0.15
+        if d.time >= 6:
+            assert np.linalg.norm(d.qpos[:3] - anchor) < 0.15
+            assert np.linalg.norm(d.qvel[:3]) < 0.1
+
+
+def test_position_limits_approach_speed(pilot_model, pilot_data):
+    m, d = pilot_model, pilot_data
+    controller = PositionController(m)
+    for _ in range(round(6 / m.opt.timestep)):
+        position_step(m, d, controller.act([100, 100, 1.5], flight_state(d)))
+        assert np.linalg.norm(d.qvel[:2]) < 1.65
+    np.testing.assert_allclose(d.qvel[:2], np.full(2, 1.5 / np.sqrt(2)), atol=0.1)
+
+
+@pytest.mark.parametrize("exit_mode", ["reset", "new_target"])
+def test_brake_can_latch_a_new_pose(pilot_model, pilot_data, exit_mode):
+    controller = PositionController(pilot_model)
+    state = flight_state(pilot_data)
+    controller.brake(state)
+    state["pos"] = np.array([2., -1., 2.])
+    state["quat"] = axis_quaternion(2, 90)
+    if exit_mode == "reset":
+        controller.reset()
+    else:
+        controller.act([3, -1, 2], state, np.pi / 2)
+    np.testing.assert_allclose(controller.brake(state),
+                               PositionController(pilot_model).brake(state), atol=1e-12)
+
+
+def test_position_reset_reproduces_episode(pilot_model, pilot_data):
+    m, d = pilot_model, pilot_data
+    controller = PositionController(m)
+    results = []
+    for _ in range(2):
+        reset_drone(m, d)
+        controller.reset()
+        d.qvel[0] = 1
+        for step in range(1000):
+            position_step(m, d, controller.brake(flight_state(d)))
+        results.append(np.r_[d.qpos, d.qvel])
+    np.testing.assert_allclose(*results, rtol=0, atol=1e-12)
+
+
+def test_position_preserves_inputs_and_brake_target(pilot_model, pilot_data):
+    controller = PositionController(pilot_model)
+    state, target = flight_state(pilot_data), np.array([1., 1., 1.5])
+    before = {key: value.copy() for key, value in state.items()}
+    controller.act(target, state)
+    controller.brake(state)
+    np.testing.assert_array_equal(target, [1, 1, 1.5])
+    for key in state:
+        np.testing.assert_array_equal(state[key], before[key])
+    # Mutating a caller-owned state array must not move the stored anchor.
+    state["pos"][0] += 1
+    expected = PositionController(pilot_model).act([0, 0, 1.5], state)
+    np.testing.assert_allclose(controller.brake(state), expected)
+    with pytest.raises(ValueError):
+        controller.act([np.nan, 0, 1.5], state)
+    np.testing.assert_allclose(controller.brake(state), expected)
+
+
+@pytest.mark.parametrize("field,value", [("pos", [0, 0]), ("pos", [0, 0, np.nan]),
+                                       ("vel", [np.inf, 0, 0]), ("quat", [0, 0, 0, 0])])
+def test_invalid_brake_call_does_not_latch(pilot_model, pilot_data, field, value):
+    controller = PositionController(pilot_model)
+    bad = flight_state(pilot_data)
+    bad[field] = value
+    with pytest.raises(ValueError):
+        controller.brake(bad)
+    state = flight_state(pilot_data)
+    state["pos"] += [2, -1, 0]
+    np.testing.assert_allclose(controller.brake(state),
+                               PositionController(pilot_model).brake(state))
+
+
+@pytest.mark.parametrize("target", [[0, 0], [0, 0, np.nan], [np.inf, 0, 1.5],
+                                    [np.finfo(float).max, 0, 1.5]])
+def test_position_rejects_bad_target(pilot_model, pilot_data, target):
+    with pytest.raises(ValueError):
+        PositionController(pilot_model).act(target, flight_state(pilot_data))

@@ -1,4 +1,4 @@
-"""X2 motor allocation, attitude, altitude and horizontal velocity control."""
+"""X2 motor allocation, attitude, altitude, velocity and position control."""
 
 import mujoco
 import numpy as np
@@ -202,3 +202,59 @@ class VelocityController:
         target_quat = np.empty(4)
         mujoco.mju_mat2Quat(target_quat, np.column_stack((forward, left, up)).ravel())
         return self.altitude.act(target_height_m, drone_state, target_quat)
+
+
+class PositionController:
+    """Track world XYZ position or brake back to the brake-entry pose.
+
+    Call each physics step. Braking is not instantaneous and can overshoot;
+    this controller does not avoid obstacles or plan a stopping distance.
+    Reset for a new episode or when leaving brake for an external controller.
+    """
+
+    def __init__(self, model):
+        self.velocity = VelocityController(model)
+        self.reset()
+
+    def reset(self):
+        """Forget the latched brake position and yaw."""
+        self._brake_position = None
+        self._brake_yaw = None
+
+    @staticmethod
+    def _position(value):
+        pos = np.asarray(value, dtype=float)
+        if pos.shape != (3,) or not np.isfinite(pos).all():
+            raise ValueError("Expected a finite world XYZ position")
+        return pos
+
+    def _control(self, target, drone_state, yaw):
+        pos = self._position(drone_state["pos"])
+        with np.errstate(over="ignore", invalid="ignore"):
+            speed = 0.6 * (target[:2] - pos[:2])
+            magnitude = np.linalg.norm(speed)
+        if not np.isfinite(magnitude):
+            raise ValueError("Position error is too large to represent")
+        if magnitude > 1.5:
+            speed = speed * (1.5 / magnitude)
+        return self.velocity.act(speed, target[2], drone_state, yaw)
+
+    def act(self, target_position_m, drone_state, target_yaw_rad=0.0):
+        """Track XYZ (m) and yaw (rad); a valid command exits latched braking."""
+        ctrl = self._control(self._position(target_position_m), drone_state, target_yaw_rad)
+        self.reset()
+        return ctrl
+
+    def brake(self, drone_state):
+        """Latch current XYZ/yaw on the first valid call, then hold that pose."""
+        target, yaw = self._brake_position, self._brake_yaw
+        if target is None:
+            target = self._position(drone_state["pos"]).copy()
+            quat = AttitudeController._quaternion(drone_state["quat"])
+            rotation = np.empty(9)
+            mujoco.mju_quat2Mat(rotation, quat)
+            yaw = float(np.arctan2(rotation[3], rotation[0]))
+        ctrl = self._control(target, drone_state, yaw)
+        # Invalid input must not latch or replace an episode's brake target.
+        self._brake_position, self._brake_yaw = target, yaw
+        return ctrl
